@@ -361,7 +361,8 @@ input,textarea,select{font-size:16px}  /* prevent iOS zoom on focus */
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 input[type=range]{-webkit-appearance:none;background:#d4d4d2;border-radius:4px;height:6px}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#3a1fcb;cursor:pointer;box-shadow:0 0 0 3px rgba(58,31,203,.18),0 0 12px rgba(58,31,203,.3)}
-button{min-height:40px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;font-family:Epilogue,system-ui,sans-serif}
+button{min-height:40px;font-family:Epilogue,system-ui,sans-serif}
+button,[role="button"],.tap{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 @keyframes fu{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes fl{from{opacity:0}to{opacity:1}}
 @keyframes drawerIn{from{opacity:0;transform:translateY(-4px);max-height:0}to{opacity:1;transform:translateY(0);max-height:600px}}
@@ -5402,24 +5403,63 @@ function MyScoresPanel(p) {
   return <Crd>
     <Lbl>🎯 My Scores</Lbl>
     <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 10 }}>
-      Your scores by event. Individual judge scores show only after the organizer reveals them.
+      Your personal prelim scores from every battle you entered. The breakdown is always visible to you — even if the public-facing reveal toggle is off.
     </div>
     {entries.map(function (e) {
       var revealed = !!e.ev.scoresRevealed;
+      // Per-judge average for this dancer across all prelim rounds
+      var judgeAverages = Array.from({ length: e.ev.nj }).map(function (_, ji) {
+        var sum = 0, ct = 0;
+        for (var r = 0; r < e.rounds; r++) {
+          var v = getRoundScore(e.sc, ji, r);
+          if (v > 0) { sum += v; ct++; }
+        }
+        return ct > 0 ? sum / ct : 0;
+      });
+      var overall = e.avg;
+
       return <div key={e.ev.id} style={{
         background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10,
         padding: "12px 14px", marginBottom: 10
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <div style={{ flex: 1, fontSize: 15, fontFamily: "Epilogue", color: "var(--tx)", fontWeight: 700 }}>{e.ev.name}</div>
-          <Tag c={revealed ? "var(--gn)" : "var(--dm)"} bg="var(--c2)">{revealed ? "REVEALED" : "AGGREGATE"}</Tag>
-        </div>
-        <div style={{ display: "flex", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: "var(--dm)" }}>Prelim avg <b style={{ color: "var(--gd)", fontFamily: "JetBrains Mono", fontSize: 16, marginLeft: 4 }}>{e.avg.toFixed(2)}</b></span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontFamily: "Epilogue", color: "var(--tx)", fontWeight: 700 }}>{e.ev.name}</div>
+          {e.ev.dt && <span style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{fmtD(e.ev.dt)}</span>}
+          <Tag c={revealed ? "var(--gn)" : "var(--gd)"} bg="var(--c2)">{revealed ? "PUBLIC" : "PRIVATE TO YOU"}</Tag>
         </div>
 
-        {revealed && <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em", marginBottom: 6 }}>PRELIM SCORES BY JUDGE</div>
+        <div style={{ display: "flex", gap: 14, marginBottom: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em" }}>PRELIM AVG</div>
+            <div style={{ fontSize: 24, color: "var(--gd)", fontFamily: "JetBrains Mono", fontWeight: 900 }}>{overall.toFixed(2)}</div>
+          </div>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em", marginBottom: 4 }}>PER JUDGE</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {judgeAverages.map(function (avg, ji) {
+                if (avg <= 0) return null;
+                var diff = avg - overall;
+                var diffColor = Math.abs(diff) < 0.3 ? "var(--gn)" : Math.abs(diff) < 0.8 ? "var(--gd)" : "var(--rd)";
+                return <div key={ji} style={{
+                  padding: "4px 8px", border: "1px solid var(--b1)", borderRadius: 6,
+                  background: "var(--c2)", display: "flex", alignItems: "baseline", gap: 4,
+                  fontFamily: "JetBrains Mono", fontSize: 11
+                }} title={"Judge " + (ji + 1) + " avg: " + avg.toFixed(2) + " (" + (diff >= 0 ? "+" : "") + diff.toFixed(2) + " vs your overall)"}>
+                  <span style={{ color: "var(--jd)", fontWeight: 700 }}>
+                    {((e.ev.jn && e.ev.jn[ji]) || ("J" + (ji + 1))).slice(0, 8)}
+                  </span>
+                  <span style={{ color: "var(--tx)", fontWeight: 800 }}>{avg.toFixed(1)}</span>
+                  <span style={{ color: diffColor, fontSize: 9 }}>
+                    {diff >= 0 ? "+" : ""}{diff.toFixed(1)}
+                  </span>
+                </div>;
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em", marginBottom: 6 }}>SCORES BY ROUND</div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "JetBrains Mono" }}>
               <thead>
@@ -5428,6 +5468,7 @@ function MyScoresPanel(p) {
                   {Array.from({ length: e.rounds }).map(function (_, r) {
                     return <th key={r} style={{ textAlign: "center", padding: "4px 6px" }}>{"R" + (r + 1)}</th>;
                   })}
+                  <th style={{ textAlign: "center", padding: "4px 6px", color: "var(--gd)" }}>AVG</th>
                 </tr>
               </thead>
               <tbody>
@@ -5442,14 +5483,17 @@ function MyScoresPanel(p) {
                         {v > 0 ? v.toFixed(1) : "—"}
                       </td>;
                     })}
+                    <td style={{ padding: "4px 6px", textAlign: "center", color: "var(--gd)", fontWeight: 700 }}>
+                      {judgeAverages[ji] > 0 ? judgeAverages[ji].toFixed(1) : "—"}
+                    </td>
                   </tr>;
                 })}
               </tbody>
             </table>
           </div>
-        </div>}
+        </div>
 
-        {e.bracketMatches.length > 0 && <div style={{ marginTop: 10 }}>
+        {e.bracketMatches.length > 0 && <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em", marginBottom: 6 }}>BRACKET MATCHES</div>
           {e.bracketMatches.map(function (m, idx) {
             var won = m.tally.winner === m.side;
@@ -5472,8 +5516,8 @@ function MyScoresPanel(p) {
           })}
         </div>}
 
-        {!revealed && <div style={{ fontSize: 11, color: "var(--dm)", fontStyle: "italic", marginTop: 6 }}>
-          Individual judge scores will appear here once the organizer reveals them.
+        {!revealed && <div style={{ fontSize: 10, color: "var(--dm)", fontStyle: "italic", marginTop: 8, padding: "6px 8px", background: "var(--c2)", borderRadius: 6 }}>
+          🔒 Only you see this breakdown — the public still sees aggregate averages until the organizer reveals scores.
         </div>}
       </div>;
     })}
