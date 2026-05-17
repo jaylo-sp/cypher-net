@@ -1821,6 +1821,82 @@ function winStreakCount(u) {
   return pl.slice(-5).filter(function (x) { return x.pl === 1; }).length;
 }
 
+// ── Trend indicator: avg-points of last 3 placements vs previous 3 ──
+function computeTrend(u) {
+  var pl = u && u.placements;
+  if (!pl || pl.length < 4) return { dir: "stable", val: 0 };
+  var recent = pl.slice(-3);
+  var older = pl.slice(-6, -3);
+  if (older.length === 0) return { dir: "stable", val: 0 };
+  var avg = function (arr) { return arr.reduce(function (s, x) { return s + (x.pts || 0); }, 0) / arr.length; };
+  var delta = avg(recent) - avg(older);
+  if (delta > 0.5) return { dir: "up", val: Math.round(delta * 10) / 10 };
+  if (delta < -0.5) return { dir: "down", val: Math.round(Math.abs(delta) * 10) / 10 };
+  return { dir: "stable", val: 0 };
+}
+
+// ── Editorial rank badge (sharp corners, gold/silver/bronze for top 3) ──
+function RankBadge(p) {
+  var n = p.rank;
+  var bg = "var(--c2)", color = "var(--tx)";
+  if (n === 1) { bg = "#fbbf24"; color = "#000"; }
+  else if (n === 2) { bg = "#cbd5e1"; color = "#000"; }
+  else if (n === 3) { bg = "#cd7f32"; color = "#fff"; }
+  return <span style={{
+    display: "inline-block",
+    padding: p.compact ? "2px 7px" : "3px 9px",
+    fontSize: p.compact ? 11 : 12,
+    fontWeight: 900, fontFamily: "JetBrains Mono",
+    background: bg, color: color, letterSpacing: ".02em",
+    borderRadius: 0,
+    flexShrink: 0, lineHeight: 1.4
+  }}>#{n}</span>;
+}
+
+// ── Trend arrow chip ──
+function TrendArrow(p) {
+  var t = p.trend;
+  if (!t || t.dir === "stable") {
+    return <span style={{
+      display: "inline-flex", alignItems: "center", gap: 2,
+      color: "var(--dm)", fontSize: 10, fontFamily: "JetBrains Mono",
+      flexShrink: 0
+    }} title="No change vs recent average">— </span>;
+  }
+  var col = t.dir === "up" ? "var(--gn)" : "var(--rd)";
+  var arrow = t.dir === "up" ? "▲" : "▼";
+  return <span style={{
+    display: "inline-flex", alignItems: "center", gap: 2,
+    color: col, fontSize: 10, fontFamily: "JetBrains Mono", fontWeight: 700,
+    flexShrink: 0
+  }} title={"Trend: " + t.dir + " " + t.val + " pts vs prior 3 events"}>
+    <span>{arrow}</span>
+    <span>{t.val}</span>
+  </span>;
+}
+
+// ── 3-stat trio (W / Events / Win %) ──
+function StatsTrio(p) {
+  var u = p.u;
+  return <div style={{
+    display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4,
+    padding: "8px 4px 4px", borderTop: "1px solid var(--b2)", marginTop: 6
+  }}>
+    <div style={{ textAlign: "center" }}>
+      <div style={{ fontSize: p.compact ? 14 : 16, fontFamily: "JetBrains Mono", fontWeight: 800, color: "var(--gn)" }}>{u.wins || 0}</div>
+      <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em" }}>WINS</div>
+    </div>
+    <div style={{ textAlign: "center" }}>
+      <div style={{ fontSize: p.compact ? 14 : 16, fontFamily: "JetBrains Mono", fontWeight: 800, color: "var(--tx)" }}>{u.eventsAttended || u.events || 0}</div>
+      <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em" }}>EVENTS</div>
+    </div>
+    <div style={{ textAlign: "center" }}>
+      <div style={{ fontSize: p.compact ? 14 : 16, fontFamily: "JetBrains Mono", fontWeight: 800, color: "var(--ac)" }}>{(u.winPct || 0) + "%"}</div>
+      <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em" }}>WIN RATE</div>
+    </div>
+  </div>;
+}
+
 // ── Tier grouping: split a sorted list into 3-5 dancer cards ──
 function buildTiers(list) {
   var tiers = [];
@@ -2933,40 +3009,43 @@ function LeaderboardEmbed(p) {
           : null;
         var spark = ((mode === "players" || mode === "kings") && u.placements) ? u.placements.slice(-8).map(function (pl) { return pl.pts || 0; }) : null;
         var wins = winStreakCount(u);
+        var trend = (mode === "players" || mode === "kings") ? computeTrend(u) : null;
+        var showStats = mode === "players" || mode === "kings";
         return <div style={{
-          display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+          padding: "10px 12px",
           borderBottom: "1px solid var(--b2)"
         }}>
-          <span style={{
-            fontSize: 13, fontWeight: 900, fontFamily: "JetBrains Mono",
-            color: rank <= 5 ? sortCol : "var(--dm)", minWidth: 26
-          }}>{"#" + rank}</span>
-          <Av name={displayName} sz={28} isCrew={isCrew} />
-          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-            <div style={{
-              fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-              display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap"
-            }}>
-              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
-              <StreakPill wins={wins} />
-              <KingPill count={u.cypherKings} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <RankBadge rank={rank} compact />
+            <Av name={displayName} sz={28} isCrew={isCrew} />
+            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+              <div style={{
+                fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+                display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap"
+              }}>
+                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+                {trend && <TrendArrow trend={trend} />}
+                <StreakPill wins={wins} />
+                <KingPill count={u.cypherKings} />
+              </div>
+              {subInfo && <div style={{
+                fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+              }}>{subInfo}</div>}
+              {meta && <div style={{
+                fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+              }}>{meta}</div>}
             </div>
-            {subInfo && <div style={{
-              fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-            }}>{subInfo}</div>}
-            {meta && <div style={{
-              fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-            }}>{meta}</div>}
+            {spark && spark.length > 0 && <div style={{ opacity: 0.8, flexShrink: 0 }}>
+              <Sparkline values={spark} width={50} height={18} color={sortCol} />
+            </div>}
+            <div style={{
+              fontSize: 15, fontWeight: 800, fontFamily: "JetBrains Mono",
+              color: sortCol, minWidth: 42, textAlign: "right"
+            }}>{valueOf(u)}</div>
           </div>
-          {spark && spark.length > 0 && <div style={{ opacity: 0.8, flexShrink: 0 }}>
-            <Sparkline values={spark} width={50} height={18} color={sortCol} />
-          </div>}
-          <div style={{
-            fontSize: 15, fontWeight: 800, fontFamily: "JetBrains Mono",
-            color: sortCol, minWidth: 42, textAlign: "right"
-          }}>{valueOf(u)}</div>
+          {showStats && (u.eventsAttended > 0) && <StatsTrio u={u} compact />}
         </div>;
       }
 
@@ -2980,11 +3059,16 @@ function LeaderboardEmbed(p) {
     {/* Footer: click-through to full Cypher Net */}
     <div style={{ marginTop: 14, textAlign: "center" }}>
       <a href={deepLink} target="_top" rel="noopener noreferrer" style={{
-        display: "inline-block", padding: "8px 14px", borderRadius: 6,
+        display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 18px", borderRadius: 0,
         background: "var(--tx)", color: "var(--bg)",
         textDecoration: "none", fontSize: 11, fontFamily: "JetBrains Mono",
         fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase"
-      }}>View on Cypher Net ↗</a>
+      }}>
+        <span>View Full Leaderboard</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M7 17L17 7M17 7H8M17 7v9" />
+        </svg>
+      </a>
     </div>
   </div>;
 }
@@ -3509,40 +3593,40 @@ function RankingsView(p) {
         var spark = sparklineData(u);
         var subInfo = (mode === "players" || mode === "kings") ? (u.city || u.country || ((u.crews || [])[0] || {}).name) : null;
         var wins = winStreakCount(u);
-        return <div style={{
-          display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
-          borderBottom: "1px solid var(--b2)"
-        }}>
-          <span style={{
-            fontSize: 15, fontWeight: 900, fontFamily: "JetBrains Mono",
-            color: rank <= 5 ? sortVal.col : "var(--dm)", minWidth: 32
-          }}>{"#" + rank}</span>
-          <Av name={displayName} sz={34} isCrew={mode === "crews"} />
-          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+        var trend = (mode === "players" || mode === "kings") ? computeTrend(u) : null;
+        var showStats = (mode === "players" || mode === "kings") && u.eventsAttended > 0;
+        return <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--b2)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <RankBadge rank={rank} />
+            <Av name={displayName} sz={34} isCrew={mode === "crews"} />
+            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+              <div style={{
+                fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+                display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"
+              }}>
+                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+                {trend && <TrendArrow trend={trend} />}
+                <StreakPill wins={wins} />
+                <KingPill count={u.cypherKings} />
+              </div>
+              {subInfo && <div style={{
+                fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2
+              }}>{subInfo}</div>}
+              <div style={{ marginTop: 3 }}>
+                {mode === "players" ? <PlacementChips placements={u.placements} /> :
+                  <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{meta}</span>}
+              </div>
+            </div>
+            {spark && spark.length > 0 && <div style={{ opacity: 0.85, flexShrink: 0 }} title="Recent placement points">
+              <Sparkline values={spark} width={70} height={24} color={sortVal.col} />
+            </div>}
             <div style={{
-              fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-              display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"
-            }}>
-              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
-              <StreakPill wins={wins} />
-              <KingPill count={u.cypherKings} />
-            </div>
-            {subInfo && <div style={{
-              fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2
-            }}>{subInfo}</div>}
-            <div style={{ marginTop: 3 }}>
-              {mode === "players" ? <PlacementChips placements={u.placements} /> :
-                <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{meta}</span>}
-            </div>
+              fontSize: 18, fontWeight: 800, fontFamily: "JetBrains Mono",
+              color: sortVal.col, minWidth: 54, textAlign: "right"
+            }}>{valueOf(u)}</div>
           </div>
-          {spark && spark.length > 0 && <div style={{ opacity: 0.85, flexShrink: 0 }} title="Recent placement points">
-            <Sparkline values={spark} width={70} height={24} color={sortVal.col} />
-          </div>}
-          <div style={{
-            fontSize: 18, fontWeight: 800, fontFamily: "JetBrains Mono",
-            color: sortVal.col, minWidth: 54, textAlign: "right"
-          }}>{valueOf(u)}</div>
+          {showStats && <StatsTrio u={u} />}
         </div>;
       }
 
