@@ -464,6 +464,24 @@ function readUrlIntent() {
     };
   } catch (e) { return {}; }
 }
+// Embed config for the leaderboard widget (?embed=leaderboard&...). Returns null when not in embed mode.
+function readEmbedConfig() {
+  if (typeof window === "undefined") return null;
+  try {
+    var sp = new URLSearchParams(window.location.search);
+    var embed = sp.get("embed");
+    if (!embed) return null;
+    return {
+      kind: embed,
+      mode: sp.get("mode") || "players",
+      country: sp.get("country") || "All",
+      sort: sp.get("sort") || "dpr",
+      limit: Math.max(1, Math.min(100, parseInt(sp.get("limit") || "10", 10) || 10)),
+      theme: sp.get("theme") === "light" ? "light" : "dark",
+      compact: sp.get("compact") === "1"
+    };
+  } catch (e) { return null; }
+}
 // Write deep-link params without triggering navigation. Pass null to clear.
 function writeUrlIntent(params) {
   if (typeof window === "undefined") return;
@@ -2531,6 +2549,315 @@ function PlayerDetail(p) {
       <Btn v="gh" onClick={p.onClose} sx={{ flex: 1 }}>Close</Btn>
     </div>
   </Modal>);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMBEDDABLE LEADERBOARD (?embed=leaderboard)
+// ═══════════════════════════════════════════════════════════════
+function modeTitle(mode, country) {
+  var base = mode === "players" || mode === "breakers" ? "Top Breakers"
+    : mode === "crews" ? "Top Crews"
+    : mode === "judges" ? "Top Judges"
+    : mode === "cities" ? "Top Cities"
+    : mode === "states" ? "Top States"
+    : mode === "countries" ? "Top Countries"
+    : "Leaderboard";
+  if (country && country !== "All") base += " · " + country;
+  return base;
+}
+
+function LeaderboardEmbed(p) {
+  var cfg = p.config;
+  var stats = useMemo(function () {
+    return calcStats(p.events || [], p.extEvents || [], p.profiles || [], p.crews || []);
+  }, [p.events, p.extEvents, p.profiles, p.crews]);
+
+  var judgesR = useMemo(function () {
+    var map = {};
+    (p.events || []).forEach(function (ev) {
+      if (!ev.jn) return;
+      for (var i = 0; i < (ev.nj || 0); i++) {
+        var name = (ev.jn[i] || "").trim();
+        if (!name) continue;
+        if (!map[name]) map[name] = { id: name, name: name, events: 0 };
+        map[name].events += 1;
+      }
+    });
+    return Object.keys(map).map(function (k) { return map[k]; });
+  }, [p.events]);
+
+  var mode = (cfg.mode === "breakers") ? "players" : cfg.mode;
+  var base;
+  if (mode === "players") {
+    base = (stats.pR || []).filter(function (x) {
+      if (!(x.dpr > 0 || x.eventsAttended > 0)) return false;
+      if (cfg.country !== "All" && x.country !== cfg.country) return false;
+      return true;
+    });
+  } else if (mode === "crews") {
+    base = (stats.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
+  } else if (mode === "judges") {
+    base = judgesR.filter(function (x) { return x.events > 0; });
+  } else if (mode === "cities") {
+    base = (stats.cityR || []).filter(function (x) {
+      if (!(x.dpr > 0 || x.events > 0)) return false;
+      if (cfg.country !== "All" && !(x.name || "").endsWith(", " + cfg.country)) return false;
+      return true;
+    });
+  } else if (mode === "states") {
+    base = (stats.stateR || []).filter(function (x) {
+      if (!(x.dpr > 0 || x.events > 0)) return false;
+      if (cfg.country !== "All" && !(x.name || "").endsWith(", " + cfg.country)) return false;
+      return true;
+    });
+  } else if (mode === "countries") {
+    base = (stats.countryR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
+  } else {
+    base = [];
+  }
+
+  var sort = mode === "judges" ? "events" : cfg.sort;
+  var sortFns = {
+    events: function (a, b2) { return (b2.events || b2.eventsAttended || 0) - (a.events || a.eventsAttended || 0); },
+    dpr: function (a, b2) { return (b2.dpr || 0) - (a.dpr || 0); },
+    wins: function (a, b2) { return (b2.wins || 0) - (a.wins || 0); },
+    winPct: function (a, b2) { return (b2.winPct || 0) - (a.winPct || 0); },
+    standings: function (a, b2) { return (b2.standings || 0) - (a.standings || 0); }
+  };
+  var sortFn = sortFns[sort] || sortFns.dpr;
+  var list = (base || []).slice().sort(sortFn).slice(0, cfg.limit);
+
+  var sortColors = {
+    events: "var(--gd)", dpr: "var(--gd)", wins: "var(--ac)",
+    winPct: "var(--gn)", standings: "var(--jd)"
+  };
+  var sortCol = sortColors[sort] || "var(--gd)";
+
+  function valueOf(u) {
+    if (sort === "events") return u.events || u.eventsAttended || 0;
+    if (sort === "dpr") return u.dpr || 0;
+    if (sort === "wins") return u.wins || 0;
+    if (sort === "winPct") return (u.winPct || 0) + "%";
+    return (u.standings || 0).toFixed(1);
+  }
+
+  var themeVars = cfg.theme === "light" ? {
+    "--bg": "#fafafa", "--tx": "#0f172a", "--dm": "#64748b",
+    "--c1": "#ffffff", "--c2": "#f1f5f9", "--b1": "#cbd5e1", "--b2": "#e2e8f0"
+  } : {};
+
+  var showPodium = !cfg.compact && list.length >= 3;
+  var isCrew = mode === "crews";
+
+  return <div style={Object.assign({}, CV, themeVars, {
+    minHeight: "100vh", background: "var(--bg)", color: "var(--tx)",
+    fontFamily: "Nunito Sans", padding: "14px 14px 24px",
+    boxSizing: "border-box"
+  })}>
+    <AppHead />
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 10 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", marginBottom: 2 }}>
+          🏆 LEADERBOARD
+        </div>
+        <h2 style={{ fontFamily: "Oswald", fontSize: 18, color: "var(--tx)", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {modeTitle(mode, cfg.country)}
+        </h2>
+      </div>
+      <a href={(typeof window !== "undefined" ? window.location.origin : "")} target="_blank" rel="noopener noreferrer"
+        style={{
+          fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)",
+          textDecoration: "none", letterSpacing: ".15em", flexShrink: 0
+        }}>CYPHER NET ↗</a>
+    </div>
+
+    {showPodium && <Podium top3={list.slice(0, 3)} sort={sort} isCrew={isCrew} />}
+
+    {list.length === 0 ? <Crd>
+      <div style={{ padding: 20, textAlign: "center", color: "var(--dm)", fontSize: 12 }}>
+        No data yet for this view.
+      </div>
+    </Crd> : <Crd sx={{ padding: 0, overflow: "hidden" }}>
+      {list.slice(showPodium ? 3 : 0).map(function (u, i) {
+        var rank = (showPodium ? 3 : 0) + i + 1;
+        var displayName = u.breakingName || u.name;
+        var subInfo = mode === "players" ? (u.city || u.country) : null;
+        var meta = mode === "crews" ? (u.eventsCount + " events · " + u.wins + " wins")
+          : mode === "judges" ? (u.events + " events judged")
+          : (mode === "cities" || mode === "states") ? ((u.players || 0) + " breakers · " + (u.wins || 0) + " wins")
+          : null;
+        var spark = (mode === "players" && u.placements) ? u.placements.slice(-8).map(function (pl) { return pl.pts || 0; }) : null;
+        return <div key={u.id || displayName} style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+          borderBottom: "1px solid var(--b2)"
+        }}>
+          <span style={{
+            fontSize: 13, fontWeight: 900, fontFamily: "JetBrains Mono",
+            color: rank <= 5 ? sortCol : "var(--dm)", minWidth: 26
+          }}>{"#" + rank}</span>
+          <Av name={displayName} sz={28} isCrew={isCrew} />
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+            <div style={{
+              fontSize: 13, fontWeight: 700, fontFamily: "Oswald", color: "var(--tx)",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+            }}>{displayName}</div>
+            {subInfo && <div style={{
+              fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+            }}>{subInfo}</div>}
+            {meta && <div style={{
+              fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+            }}>{meta}</div>}
+          </div>
+          {spark && spark.length > 0 && <div style={{ opacity: 0.8, flexShrink: 0 }}>
+            <Sparkline values={spark} width={50} height={18} color={sortCol} />
+          </div>}
+          <div style={{
+            fontSize: 15, fontWeight: 800, fontFamily: "JetBrains Mono",
+            color: sortCol, minWidth: 42, textAlign: "right"
+          }}>{valueOf(u)}</div>
+        </div>;
+      })}
+    </Crd>}
+  </div>;
+}
+
+function EmbedHelp() {
+  var _m = useState("players"), mode = _m[0], setMode = _m[1];
+  var _c = useState("All"), country = _c[0], setCountry = _c[1];
+  var _s = useState("dpr"), sort = _s[0], setSort = _s[1];
+  var _l = useState("10"), limit = _l[0], setLimit = _l[1];
+  var _t = useState("dark"), theme = _t[0], setTheme = _t[1];
+  var _cp = useState(false), compact = _cp[0], setCompact = _cp[1];
+  var _w = useState("380"), w = _w[0], setW = _w[1];
+  var _h = useState("700"), h = _h[0], setH = _h[1];
+  var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
+
+  var origin = typeof window !== "undefined" ? window.location.origin : "https://cyphernet.vercel.app";
+  var sp = new URLSearchParams();
+  sp.set("embed", "leaderboard");
+  sp.set("mode", mode);
+  if (country !== "All") sp.set("country", country);
+  sp.set("sort", sort);
+  sp.set("limit", limit);
+  sp.set("theme", theme);
+  if (compact) sp.set("compact", "1");
+  var src = origin + "/?" + sp.toString();
+  var iframe = '<iframe src="' + src + '" width="' + w + '" height="' + h + '" frameborder="0" style="border:none;border-radius:12px;overflow:hidden;background:transparent"></iframe>';
+
+  function copyCode() {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(iframe).then(function () {
+        setCopied(true);
+        setTimeout(function () { setCopied(false); }, 1500);
+      });
+    }
+  }
+
+  return <div style={Object.assign({}, CV, {
+    minHeight: "100vh", background: "var(--bg)", color: "var(--tx)",
+    fontFamily: "Nunito Sans", padding: "20px"
+  })}>
+    <AppHead />
+    <div style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em" }}>📺 EMBED WIDGET</div>
+        <h1 style={{ fontFamily: "Oswald", fontSize: 28, color: "var(--tx)", marginBottom: 14 }}>Leaderboard Embed</h1>
+        <p style={{ fontSize: 13, color: "var(--dm)", marginBottom: 16, lineHeight: 1.5 }}>
+          Drop this iframe on any website — your blog, event page, crew site, anywhere. It updates live as you score matches. No login or tokens needed.
+        </p>
+
+        <Crd>
+          <Lbl>Mode</Lbl>
+          <select value={mode} onChange={function (e) { setMode(e.target.value); }} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Oswald", marginBottom: 10
+          }}>
+            <option value="players">Top Breakers</option>
+            <option value="crews">Top Crews</option>
+            <option value="judges">Top Judges</option>
+            <option value="cities">Top Cities</option>
+            <option value="states">Top States</option>
+            <option value="countries">Top Countries</option>
+          </select>
+
+          {(mode === "players" || mode === "cities" || mode === "states") && <>
+            <Lbl>Country filter (optional)</Lbl>
+            <Inp value={country} onChange={setCountry} placeholder="All, Canada, Japan, …" />
+          </>}
+
+          {mode !== "judges" && <>
+            <Lbl>Sort by</Lbl>
+            <select value={sort} onChange={function (e) { setSort(e.target.value); }} style={{
+              width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+              color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Oswald", marginBottom: 10
+            }}>
+              <option value="dpr">DPR</option>
+              <option value="wins">Wins</option>
+              <option value="winPct">Win %</option>
+              <option value="standings">Avg Score</option>
+            </select>
+          </>}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <Lbl>Top N rows</Lbl>
+              <Inp value={limit} onChange={setLimit} placeholder="10" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <Lbl>Theme</Lbl>
+              <select value={theme} onChange={function (e) { setTheme(e.target.value); }} style={{
+                width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+                color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Oswald"
+              }}>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <Lbl>Width (px)</Lbl>
+              <Inp value={w} onChange={setW} placeholder="380" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <Lbl>Height (px)</Lbl>
+              <Inp value={h} onChange={setH} placeholder="700" />
+            </div>
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "var(--dm)", cursor: "pointer" }}>
+            <input type="checkbox" checked={compact} onChange={function (e) { setCompact(e.target.checked); }} />
+            Compact (no podium — just a list)
+          </label>
+        </Crd>
+
+        <Crd>
+          <Lbl>Copy iframe HTML</Lbl>
+          <textarea readOnly value={iframe} rows={5} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)",
+            fontSize: 11, fontFamily: "JetBrains Mono", resize: "vertical", boxSizing: "border-box"
+          }} />
+          <Btn v="gn" onClick={copyCode} sx={{ width: "100%", marginTop: 8, fontSize: 13 }}>
+            {copied ? "✓ Copied!" : "📋 Copy iframe code"}
+          </Btn>
+          <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 10, lineHeight: 1.5 }}>
+            Paste it directly into any HTML page, blog post, or website builder that allows raw HTML / embed blocks.
+            The widget refreshes automatically when you update scores in Cypher Net.
+          </div>
+        </Crd>
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginBottom: 8 }}>↓ LIVE PREVIEW</div>
+        <iframe src={src} width={w} height={h} frameBorder="0"
+          style={{ border: "1px solid var(--b1)", borderRadius: 12, background: "transparent", maxWidth: "100%" }} />
+      </div>
+    </div>
+  </div>;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5277,6 +5604,16 @@ function SettingsView(p) {
     </Crd>
 
     <Crd sx={{ marginTop: 20 }}>
+      <Lbl>📺 Embed Leaderboard Widget</Lbl>
+      <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10 }}>
+        Drop your rankings into any website as a live iframe. Configurable mode, country, theme, size.
+      </div>
+      <Btn v="jd" onClick={function () {
+        if (typeof window !== "undefined") window.open("/?embed=help", "_blank");
+      }} sx={{ width: "100%", fontSize: 13 }}>Open Embed Builder →</Btn>
+    </Crd>
+
+    <Crd sx={{ marginTop: 20 }}>
       <Lbl>🗺 Manage Cities</Lbl>
       <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10 }}>
         Delete cities added by mistake (typos, duplicates). Cities in use by breakers or crews show a warning.
@@ -7422,6 +7759,8 @@ export default function App() {
     });
   }, []);
 
+  var embedCfg = readEmbedConfig();
+
   if (!loaded) return <div style={Object.assign({}, CV, {
     minHeight: "100vh", background: "var(--bg)",
     display: "flex", alignItems: "center", justifyContent: "center"
@@ -7429,6 +7768,14 @@ export default function App() {
     <AppHead />
     <div style={{ color: "var(--dm)", fontFamily: "Oswald", fontSize: 18 }}>Loading…</div>
   </div>;
+
+  // Embed mode short-circuits RoleGate + role views entirely.
+  if (embedCfg) {
+    if (embedCfg.kind === "help") return <EmbedHelp />;
+    if (embedCfg.kind === "leaderboard") return <LeaderboardEmbed
+      config={embedCfg} events={events} extEvents={extEvents}
+      profiles={profiles} crews={crews} />;
+  }
 
   if (!role) return <div><RoleGate onRole={setRole} pins={pins} />
     <ToastContainer toasts={toasts} onUndo={undoToast} onDismiss={dismissToast} />
