@@ -501,6 +501,59 @@ function readUrlIntent() {
     };
   } catch (e) { return {}; }
 }
+// ── Debug overlay: shows live URL params + computed state. Toggle via ?debug=true ──
+function EmbedDebugger(p) {
+  if (typeof window === "undefined") return null;
+  var sp = new URLSearchParams(window.location.search);
+  if (sp.get("debug") !== "true") return null;
+  var info = p.info || {};
+  var viewport = window.innerWidth + "×" + window.innerHeight;
+  var rows = [
+    { k: "EMBED", v: sp.get("embed") || "—" },
+    { k: "VIEW", v: info.view || sp.get("view") || "dashboard" },
+    { k: "MODE", v: info.mode || sp.get("mode") || "players" },
+    { k: "SORT", v: info.sort || sp.get("sort") || "dpr" },
+    { k: "WINDOW", v: info.window || sp.get("window") || "all" },
+    { k: "FORMAT", v: info.format || sp.get("format") || "all" },
+    { k: "COUNTRY", v: info.country || sp.get("country") || "All" },
+    { k: "Q", v: info.q || sp.get("q") || "—" },
+    { k: "LIMIT", v: info.limit || sp.get("limit") || "—" },
+    { k: "THEME", v: info.theme || sp.get("theme") || "dark" },
+    { k: "COMPACT", v: sp.get("compact") === "1" ? "yes" : "no" },
+    { k: "INTERACTIVE", v: sp.get("interactive") === "0" ? "no" : "yes" },
+    { k: "VIEWPORT", v: viewport },
+    { k: "IN IFRAME", v: window.self !== window.top ? "yes" : "no" }
+  ];
+  return <div style={{
+    position: "fixed", top: 8, right: 8, zIndex: 9999,
+    background: "rgba(80,10,10,0.92)",
+    border: "1px solid #ef4444", borderRadius: 8,
+    padding: "8px 10px", color: "#fecaca",
+    fontFamily: "JetBrains Mono", fontSize: 10, lineHeight: 1.45,
+    maxWidth: 260, pointerEvents: "none",
+    boxShadow: "0 4px 18px rgba(0,0,0,0.4)"
+  }}>
+    <div style={{
+      fontWeight: 800, letterSpacing: ".15em", textTransform: "uppercase",
+      color: "#fca5a5", borderBottom: "1px solid #7f1d1d",
+      paddingBottom: 4, marginBottom: 6
+    }}>🛡 Cypher Net Debugger</div>
+    {rows.map(function (r) {
+      return <div key={r.k} style={{ display: "flex", gap: 6, justifyContent: "space-between" }}>
+        <span style={{ color: "#a1a1aa" }}>{r.k}</span>
+        <span style={{ color: "#fecaca", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{String(r.v)}</span>
+      </div>;
+    })}
+    {info.rendered !== undefined && <div style={{
+      marginTop: 6, paddingTop: 6, borderTop: "1px solid #7f1d1d",
+      color: "#86efac", display: "flex", justifyContent: "space-between"
+    }}>
+      <span>RENDERED ROWS</span>
+      <span style={{ fontWeight: 800 }}>{info.rendered}</span>
+    </div>}
+  </div>;
+}
+
 // Embed config for the leaderboard widget (?embed=leaderboard&...). Returns null when not in embed mode.
 function readEmbedConfig() {
   if (typeof window === "undefined") return null;
@@ -3803,6 +3856,12 @@ function LeaderboardEmbed(p) {
       <LeaderboardDashboard compact
         pR={stats.pR} cR={stats.cR} cityR={stats.cityR} stateR={stats.stateR}
         countryR={stats.countryR} events={filteredEvents} />
+      <EmbedDebugger info={{
+        view: "dashboard", mode: mode, sort: cfg.sort,
+        window: winSel, format: fmtSel, country: cfg.country, q: qSel,
+        limit: cfg.limit, theme: cfg.theme,
+        rendered: (stats.pR || []).filter(function (x) { return (x.dpr || 0) > 0; }).length
+      }} />
     </div>;
   }
 
@@ -4025,6 +4084,12 @@ function LeaderboardEmbed(p) {
         </svg>
       </a>
     </div>
+    <EmbedDebugger info={{
+      view: "list", mode: mode, sort: sort,
+      window: winSel, format: fmtSel, country: cfg.country, q: qSel,
+      limit: cfg.limit, theme: cfg.theme,
+      rendered: list.length
+    }} />
   </div>;
 }
 
@@ -4256,6 +4321,11 @@ function EmbedHelp() {
           style={{ border: "1px solid var(--b1)", borderRadius: 12, background: "transparent", maxWidth: "100%" }} />
       </div>
     </div>
+    <EmbedDebugger info={{
+      view: viewSel, mode: mode, sort: sort,
+      window: winSel, format: fmtSel, country: country, q: q,
+      limit: limit, theme: theme
+    }} />
   </div>;
 }
 
