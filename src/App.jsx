@@ -25,6 +25,15 @@ var BTYPES = [
   { id: "lms4", l: "Last Man Standing 4v4", d: "Last dancer standing wins. Crews of 4 eliminate one by one." }
 ];
 // Format-type helpers — used to switch UI flows
+// Strip the highest + lowest judge before averaging (Olympic-style judging fairness)
+function sanitizedAverage(scores) {
+  if (!scores || scores.length === 0) return 0;
+  if (scores.length < 3) return scores.reduce(function (a, b) { return a + b; }, 0) / scores.length;
+  var sorted = scores.slice().sort(function (a, b) { return a - b; });
+  var trimmed = sorted.slice(1, -1);
+  return trimmed.reduce(function (a, b) { return a + b; }, 0) / trimmed.length;
+}
+
 function isDraftFormat(t) { return t === "draft3" || t === "draft4" || t === "draft5" }
 function isCaptureFormat(t) { return t === "capture3" || t === "capture4" || t === "capture5" }
 function isLmsFormat(t) { return t === "lms3" || t === "lms4" }
@@ -327,7 +336,7 @@ var COUNTRIES = [
   "United Arab Emirates", "Uruguay", "USA", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
 ];
 
-var FONT_URL = "https://fonts.googleapis.com/css2?family=Anton&family=Epilogue:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&display=swap";
+var FONT_URL = "https://fonts.googleapis.com/css2?family=Anton&family=Epilogue:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&family=Syncopate:wght@400;700&display=swap";
 
 // Cypher Space theme — light, cream bg, electric-purple signature.
 var CV = {
@@ -644,7 +653,7 @@ function calcStats(events, extEvents, profiles, crews) {
         }
         var sc = (ev.scores || {})[p.id] || [];
         var act = sc.slice(0, ev.nj).filter(function (s) { return s > 0 });
-        if (act.length > 0) pd[p.pid].sc.push(act.reduce(function (a, b2) { return a + b2 }, 0) / act.length);
+        if (act.length > 0) pd[p.pid].sc.push(sanitizedAverage(act));
       }
       var cid = p.crewId;
       if (cid && cd[cid]) {
@@ -658,7 +667,7 @@ function calcStats(events, extEvents, profiles, crews) {
         } else { cd[cid].tp += PARTICIPATION_PTS + level.pastPrelimsBonus; }
         var sc2 = (ev.scores || {})[p.id] || [];
         var act2 = sc2.slice(0, ev.nj).filter(function (s) { return s > 0 });
-        if (act2.length > 0) cd[cid].sc.push(act2.reduce(function (a, b2) { return a + b2 }, 0) / act2.length);
+        if (act2.length > 0) cd[cid].sc.push(sanitizedAverage(act2));
       }
     });
     if (ev.cypherKingPid && pd[ev.cypherKingPid]) {
@@ -2556,6 +2565,108 @@ function CrewEditor(p) {
   </div>);
 }
 
+// ── Fast Event Creator: 2-tap quick-launch with preset templates ──
+function FastEventCreator(p) {
+  var TEMPLATES = [
+    { id: "solo", l: "1v1 Pro Breaking", type: "solo", size: 16, nj: 3, desc: "Solo bracket · 16 dancers · 3 judges" },
+    { id: "2v2", l: "2v2 Championship", type: "2v2", size: 16, nj: 3, desc: "2v2 fixed-team bracket · 3 judges" },
+    { id: "3v3", l: "3v3 Championship", type: "3v3", size: 8, nj: 3, desc: "3v3 fixed-team bracket · 8 entries" },
+    { id: "crew", l: "Crew vs Crew", type: "crew", size: 8, nj: 3, desc: "Crew battle · 8 crews · 3 judges" }
+  ];
+  var _tpl = useState("solo"), tplId = _tpl[0], setTplId = _tpl[1];
+  var _name = useState(""), name = _name[0], setName = _name[1];
+  var todayIso = new Date().toISOString().slice(0, 10);
+  var _dt = useState(todayIso), dt = _dt[0], setDt = _dt[1];
+  var _level = useState("local"), level = _level[0], setLevel = _level[1];
+
+  function launch() {
+    var tpl = TEMPLATES.find(function (x) { return x.id === tplId; }) || TEMPLATES[0];
+    var ev = {
+      id: "ev" + Date.now(),
+      name: (name && name.trim()) || tpl.l,
+      type: tpl.type,
+      bracketSize: tpl.size,
+      nj: tpl.nj,
+      dt: dt,
+      level: level,
+      players: [],
+      scores: {},
+      jn: {},
+      jNotes: {},
+      bracket: null,
+      signupsOpen: false,
+      nr: 0,
+      roundsPerStage: { r16: 1, r8: 3, r4: 3, r2: 3, final: 5 },
+      djs: [], mcs: [], volunteers: [], organizers: [],
+      details: {}
+    };
+    p.onSave(ev);
+  }
+
+  return <div style={{ maxWidth: 520, margin: "0 auto", animation: "fu .3s ease" }}>
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--gd)", letterSpacing: ".18em", marginBottom: 4 }}>⚡ QUICK LAUNCH</div>
+      <h2 style={{ fontFamily: "Anton, Impact, sans-serif", fontSize: 28, color: "var(--tx)", textTransform: "uppercase", letterSpacing: "-.005em", lineHeight: 1 }}>Two-Tap Event</h2>
+      <p style={{ fontSize: 12, color: "var(--dm)", marginTop: 6 }}>
+        Pick a format. We pre-fill the bracket size, judge count, and point matrix. Customize after if needed via the event detail.
+      </p>
+    </div>
+
+    <Crd>
+      <Lbl>Format Template</Lbl>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 14 }}>
+        {TEMPLATES.map(function (t) {
+          var active = tplId === t.id;
+          return <button key={t.id} onClick={function () { setTplId(t.id); }} style={{
+            padding: "12px 14px", textAlign: "left",
+            border: "2px solid " + (active ? "var(--gd)" : "var(--b1)"),
+            background: active ? "var(--gd2)" : "var(--c1)",
+            color: "var(--tx)", cursor: "pointer", borderRadius: 10,
+            transition: "border-color .15s, background .15s"
+          }}>
+            <div style={{ fontFamily: "Epilogue", fontWeight: 800, fontSize: 14, color: active ? "var(--gd)" : "var(--tx)" }}>{t.l}</div>
+            <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 4, fontFamily: "JetBrains Mono" }}>{t.desc}</div>
+          </button>;
+        })}
+      </div>
+
+      <Lbl>Event Name (optional)</Lbl>
+      <Inp value={name} onChange={setName} placeholder="e.g. Summer Jam Cypher 2026" />
+
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <div style={{ flex: 1 }}>
+          <Lbl>Date</Lbl>
+          <input type="date" value={dt} onChange={function (e) { setDt(e.target.value); }}
+            style={{
+              width: "100%", padding: "12px 14px", fontSize: 15, background: "var(--inp)",
+              border: "2px solid var(--b1)", borderRadius: 10, color: "var(--tx)", outline: "none",
+              fontFamily: "Epilogue", boxSizing: "border-box"
+            }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <Lbl>Level</Lbl>
+          <select value={level} onChange={function (e) { setLevel(e.target.value); }}
+            style={{
+              width: "100%", padding: "12px 14px", fontSize: 15, background: "var(--inp)",
+              border: "2px solid var(--b1)", borderRadius: 10, color: "var(--tx)",
+              fontFamily: "Epilogue", boxSizing: "border-box"
+            }}>
+            <option value="local">Local</option>
+            <option value="regional">Regional</option>
+            <option value="national">National</option>
+            <option value="world">World</option>
+          </select>
+        </div>
+      </div>
+    </Crd>
+
+    <div style={{ display: "flex", gap: 8 }}>
+      <Btn v="gh" onClick={p.onCancel} sx={{ flex: 1 }}>Cancel</Btn>
+      <Btn onClick={launch} sx={{ flex: 2 }}>Initialize Event →</Btn>
+    </div>
+  </div>;
+}
+
 function EventForm(p) {
   var ev = p.ev;
   var isNew = !ev;
@@ -3420,7 +3531,39 @@ function LeaderboardDashboard(p) {
   </div>;
 }
 
+// Posts the widget's current document height to the parent frame so Squarespace
+// (or any embedder that listens for { type: "CYPHER_EMBED_HEIGHT" }) can shrink-wrap the iframe.
+function useEmbedHeight() {
+  useEffect(function () {
+    if (typeof window === "undefined" || window.self === window.top) return;
+    var post = function () {
+      try {
+        var h = Math.max(
+          document.documentElement.scrollHeight,
+          document.body ? document.body.scrollHeight : 0
+        );
+        window.parent.postMessage({ type: "CYPHER_EMBED_HEIGHT", height: h }, "*");
+      } catch (e) {}
+    };
+    post();
+    var ro = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(post);
+      ro.observe(document.documentElement);
+    } else {
+      window.addEventListener("resize", post);
+    }
+    var iv = setInterval(post, 1000); // belt-and-braces for late image loads
+    return function () {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", post);
+      clearInterval(iv);
+    };
+  }, []);
+}
+
 function LeaderboardEmbed(p) {
+  useEmbedHeight();
   var cfg = p.config;
   // Local state mirrors the embed's interactive chips. Initial values come from URL params (cfg).
   var _md = useState((cfg.mode === "breakers") ? "players" : cfg.mode), mode = _md[0], setMode = _md[1];
@@ -3563,11 +3706,11 @@ function LeaderboardEmbed(p) {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 10, paddingBottom: 12, borderBottom: "1px solid var(--b1)" }}>
         <div style={{ minWidth: 0 }}>
           <h2 style={{
-            fontFamily: "Epilogue", fontSize: 22,
+            fontFamily: "Syncopate, Epilogue, sans-serif", fontSize: 20,
             background: "linear-gradient(90deg, #fbbf24 0%, #d97706 100%)",
             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
             backgroundClip: "text",
-            fontWeight: 900, textTransform: "uppercase", letterSpacing: ".06em", margin: 0, lineHeight: 1
+            fontWeight: 700, textTransform: "uppercase", letterSpacing: ".14em", margin: 0, lineHeight: 1.1
           }}>Cypher Rankings</h2>
           <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 4, letterSpacing: ".05em" }}>
             Current season aggregates
@@ -3594,11 +3737,11 @@ function LeaderboardEmbed(p) {
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 10, paddingBottom: 12, borderBottom: "1px solid var(--b1)" }}>
       <div style={{ minWidth: 0 }}>
         <h2 style={{
-          fontFamily: "Epilogue", fontSize: 22,
+          fontFamily: "Syncopate, Epilogue, sans-serif", fontSize: 20,
           background: "linear-gradient(90deg, #fbbf24 0%, #d97706 100%)",
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
           backgroundClip: "text",
-          fontWeight: 900, textTransform: "uppercase", letterSpacing: ".06em", margin: 0, lineHeight: 1,
+          fontWeight: 700, textTransform: "uppercase", letterSpacing: ".14em", margin: 0, lineHeight: 1.1,
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
         }}>
           {modeTitle(mode, cfg.country)}
@@ -7969,11 +8112,36 @@ function EventDetailView(p) {
     })()}
 
     {tab === "players" && !isTeamType(ev.type) && <div>
-      <Lbl>Add Breaker</Lbl>
-      <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 6 }}>
-        Search the breaker database, or type a new name and press Enter to add as new.
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+        <Lbl>Add Breaker</Lbl>
+        {ev.players.length > 0 && (function () {
+          var checkedIn = ev.players.filter(function (pl) { return pl.checkedIn; }).length;
+          return <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: checkedIn > 0 ? "var(--gn)" : "var(--dm)", letterSpacing: ".1em" }}>
+              {checkedIn}/{ev.players.length} CHECKED IN
+            </span>
+            <button onClick={function () {
+              upd(ev.id, function (d) {
+                d.checkInMode = !d.checkInMode;
+                return d;
+              });
+            }} style={{
+              padding: "5px 10px", borderRadius: 6,
+              border: "1px solid " + (ev.checkInMode ? "var(--gn)" : "var(--b1)"),
+              background: ev.checkInMode ? "var(--gn2)" : "transparent",
+              color: ev.checkInMode ? "var(--gn)" : "var(--dm)",
+              fontSize: 10, fontFamily: "JetBrains Mono", fontWeight: 800,
+              letterSpacing: ".1em", cursor: "pointer", textTransform: "uppercase"
+            }}>{ev.checkInMode ? "Done" : "Check-in"}</button>
+          </div>;
+        })()}
       </div>
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 6 }}>
+        {ev.checkInMode
+          ? "Tap any row to toggle check-in status. Add/edit buttons hidden while checking in."
+          : "Search the breaker database, or type a new name and press Enter to add as new."}
+      </div>
+      {!ev.checkInMode && <div style={{ marginBottom: 14 }}>
         <PlayerSearch profiles={p.profiles} exclude={ev.players.map(function (pl) { return pl.pid }).filter(Boolean)}
           placeholder="Search breakers, or type a new name…"
           onSelect={function (prof) {
@@ -7996,8 +8164,45 @@ function EventDetailView(p) {
               return d;
             });
           }} />
-      </div>
+      </div>}
       {ev.players.map(function (pl, i) {
+        if (ev.checkInMode) {
+          // Big tap-target with status dot
+          return <div key={pl.id} onClick={function () {
+            upd(ev.id, function (d) {
+              var idx = d.players.findIndex(function (x) { return x.id === pl.id; });
+              if (idx >= 0) d.players[idx] = Object.assign({}, d.players[idx], { checkedIn: !d.players[idx].checkedIn });
+              return d;
+            });
+          }} style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
+            background: pl.checkedIn ? "var(--gn2)" : "var(--c1)",
+            border: "2px solid " + (pl.checkedIn ? "var(--gn)" : "var(--b1)"),
+            borderRadius: 10, marginBottom: 6, cursor: "pointer",
+            transition: "background .15s, border-color .15s",
+            userSelect: "none"
+          }}>
+            <span style={{
+              width: 12, height: 12, borderRadius: "50%", flexShrink: 0,
+              background: pl.checkedIn ? "var(--gn)" : "transparent",
+              border: "2px solid " + (pl.checkedIn ? "var(--gn)" : "var(--b1)"),
+              animation: pl.checkedIn ? "pulse 2s ease-in-out infinite" : "none"
+            }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
+              {pl.crew && <div style={{ fontSize: 11, color: "var(--dm)" }}>{pl.crew}</div>}
+            </div>
+            <div style={{
+              padding: "4px 10px",
+              borderRadius: 5,
+              background: pl.checkedIn ? "var(--gn)" : "transparent",
+              color: pl.checkedIn ? "#fff" : "var(--dm)",
+              border: "1px solid " + (pl.checkedIn ? "var(--gn)" : "var(--b1)"),
+              fontSize: 10, fontFamily: "JetBrains Mono", fontWeight: 800,
+              letterSpacing: ".1em", textTransform: "uppercase"
+            }}>{pl.checkedIn ? "✓ In" : "Tap to check in"}</div>
+          </div>;
+        }
         return <div key={pl.id} style={{
           display: "flex", alignItems: "center", gap: 10,
           background: "var(--c1)", borderRadius: 10, padding: "10px 14px",
@@ -8011,6 +8216,7 @@ function EventDetailView(p) {
             <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
             {pl.crew && <div style={{ fontSize: 11, color: "var(--dm)" }}>{pl.crew}</div>}
           </div>
+          {pl.checkedIn && <Tag c="var(--gn)" bg="var(--gn2)">✓</Tag>}
           {pl.pid && <Tag c="var(--jd)" bg="var(--jd2)">DB</Tag>}
           <button onClick={function () {
             var current = pl.clip || "";
@@ -8670,6 +8876,16 @@ function Admin(p) {
       }} />
   </div>;
 
+  if (view === "quickLaunch") return <div>
+    <Crumbs items={[{ label: "Home", onClick: goHome }, { label: "Quick Launch" }]} />
+    <FastEventCreator
+      onCancel={function () { setView("home") }}
+      onSave={function (ev2) {
+        p.setEvents(function (prev) { return [ev2].concat(prev); });
+        setSelId(ev2.id); setView("detail");
+      }} />
+  </div>;
+
   if (view === "playerEdit") return <div>
     <Crumbs items={[
       { label: "Home", onClick: goHome },
@@ -8829,6 +9045,7 @@ function Admin(p) {
     </div>
 
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      <Btn v="gd" onClick={function () { setView("quickLaunch") }} sx={{ flex: "1 1 auto", fontSize: 13 }} title="Two-tap event with preset templates">⚡ Quick Launch</Btn>
       <Btn onClick={function () { setView("create") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>+ Event</Btn>
       <Btn v="cr" onClick={function () { setEditExt(null); setView("extEdit") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>+ External</Btn>
       <Btn v="out" onClick={function () { setView("database") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>Breakers</Btn>
