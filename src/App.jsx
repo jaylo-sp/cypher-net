@@ -714,8 +714,8 @@ function AppHead() { return (<><link href={FONT_URL} rel="stylesheet" /><style>{
 
 function Btn(p) {
   var m = {
-    pri: { background: p.disabled ? "var(--b1)" : "var(--ac)", color: p.disabled ? "var(--dm)" : "#fff", border: "none" },
-    out: { background: "transparent", color: "var(--ac)", border: "2px solid var(--ac)" },
+    pri: { background: p.disabled ? "var(--b1)" : "var(--tx)", color: p.disabled ? "var(--dm)" : "#fff", border: "none" },
+    out: { background: "transparent", color: "var(--tx)", border: "2px solid var(--tx)" },
     gh: { background: "transparent", color: "var(--dm)", border: "1px solid var(--b1)" },
     gn: { background: "var(--gn2)", color: "var(--gn)", border: "2px solid var(--gn)" },
     cr: { background: "var(--cr2)", color: "var(--cr)", border: "2px solid var(--cr)" },
@@ -929,7 +929,7 @@ function TBtn(p) {
     padding: "10px 16px", border: "none", borderRadius: "8px 8px 0 0",
     fontFamily: "Epilogue", fontSize: 14, fontWeight: 700, cursor: "pointer",
     background: p.active ? "var(--c1)" : "transparent",
-    color: p.active ? "var(--ac)" : "var(--dm)",
+    color: p.active ? "var(--tx)" : "var(--dm)",
     borderBottom: p.active ? "3px solid var(--ac)" : "3px solid transparent",
     textTransform: "uppercase", whiteSpace: "nowrap"
   }}>{p.label}{p.ct !== undefined && <span style={{
@@ -7650,8 +7650,8 @@ function RoleGate(p) {
           <Btn v="gh" onClick={function () { auth.signOut(); }} sx={{ fontSize: 11, padding: "5px 10px" }}>Sign Out</Btn>
         </> : <Btn v="gn" onClick={function () { setShowAuth(true); }} sx={{ fontSize: 11, padding: "5px 12px" }}>Sign In</Btn>}
       </div>
-      <div style={{ fontSize: 12, color: "var(--ac)", fontFamily: "JetBrains Mono", letterSpacing: ".4em", marginBottom: 14 }}>
-        ◆ SCORE · SEED · COMPETE ◆
+      <div style={{ fontSize: 12, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".4em", marginBottom: 14 }}>
+        <span style={{ color: "var(--ac)" }}>◆</span> SCORE · SEED · COMPETE <span style={{ color: "var(--ac)" }}>◆</span>
       </div>
       <h1 style={{
         fontFamily: "Anton, Impact, sans-serif", fontSize: 84, letterSpacing: "-.01em",
