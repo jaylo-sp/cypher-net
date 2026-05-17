@@ -1836,6 +1836,166 @@ function computeTrend(u) {
   return { dir: "stable", val: 0 };
 }
 
+// ── Tie-breaker chains: secondary fields kick in when the primary is tied ──
+var TIE_CHAINS = {
+  dpr: ["standings", "wins", "eventsAttended"],
+  participation: ["standings", "wins", "eventsAttended"],
+  standings: ["dpr", "wins"],
+  wins: ["winPct", "dpr"],
+  winPct: ["wins", "dpr"],
+  events: ["wins", "dpr"],
+  cypherKings: ["dpr", "wins"]
+};
+function makeSorter(primary) {
+  var chain = [primary].concat(TIE_CHAINS[primary] || []);
+  function valOf(u, key) {
+    if (key === "events") return u.events != null ? u.events : (u.eventsAttended || 0);
+    return u[key] != null ? u[key] : 0;
+  }
+  return function (a, b) {
+    for (var i = 0; i < chain.length; i++) {
+      var k = chain[i];
+      var av = valOf(a, k), bv = valOf(b, k);
+      if (bv !== av) return bv - av;
+    }
+    return 0;
+  };
+}
+
+// ── Skeleton loading row (Tailwind-inspired shimmer) ──
+function SkeletonRow(p) {
+  return <div style={{
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: 14, background: "var(--c1)", border: "1px solid var(--b1)",
+    borderRadius: 10, marginBottom: 8, animation: "pulse 1.4s ease-in-out infinite",
+    animationDelay: (p.delay || 0) + "s"
+  }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, flex: "0 0 60%" }}>
+      <div style={{ width: 20, height: 14, background: "var(--c2)", borderRadius: 3 }} />
+      <div style={{ width: 32, height: 32, background: "var(--c2)", borderRadius: "50%" }} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ width: "50%", height: 12, background: "var(--c2)", borderRadius: 3 }} />
+        <div style={{ width: "30%", height: 10, background: "var(--c2)", borderRadius: 3 }} />
+      </div>
+    </div>
+    <div style={{ width: 44, height: 20, background: "var(--c2)", borderRadius: 4 }} />
+  </div>;
+}
+function SkeletonLeaderboard(p) {
+  var rows = p.rows || 5;
+  return <div style={Object.assign({}, CV, {
+    minHeight: "100vh", background: "var(--bg)", padding: 16, fontFamily: "Epilogue"
+  })}>
+    <AppHead />
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+      paddingBottom: 12, borderBottom: "1px solid var(--b1)", marginBottom: 14
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ width: "55%", height: 18, background: "var(--c2)", borderRadius: 3, marginBottom: 6, animation: "pulse 1.4s ease-in-out infinite" }} />
+        <div style={{ width: "30%", height: 10, background: "var(--c2)", borderRadius: 3, animation: "pulse 1.4s ease-in-out infinite", animationDelay: "0.1s" }} />
+      </div>
+    </div>
+    {Array.from({ length: rows }).map(function (_, i) {
+      return <SkeletonRow key={i} delay={i * 0.06} />;
+    })}
+  </div>;
+}
+
+// ── Row drawer: expanded detail panel with placements (dancers) or roster (crews) ──
+function RowDrawer(p) {
+  var u = p.u;
+  var mode = p.mode;
+  var isCrew = mode === "crews";
+
+  if (isCrew) {
+    var members = (p.profiles || []).filter(function (pr) {
+      return (pr.crews || []).some(function (c) { return c.id === u.id; });
+    }).map(function (pr) {
+      var ps = (p.pR || []).find(function (x) { return x.id === pr.id; });
+      return { id: pr.id, name: pr.breakingName, participation: (ps && ps.dpr) || 0, standings: (ps && ps.standings) || 0, eventsAttended: (ps && ps.eventsAttended) || 0 };
+    }).sort(function (a, b) { return b.participation - a.participation; });
+
+    return <div style={{
+      background: "var(--c2)", padding: 12, borderTop: "1px solid var(--b1)",
+      animation: "fl .25s ease"
+    }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginBottom: 8 }}>SEASON BREAKDOWN</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div style={{ background: "var(--c1)", padding: 8, border: "1px solid var(--b1)", textAlign: "center" }}>
+          <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em" }}>TOTAL ENTRIES</div>
+          <div style={{ fontSize: 15, fontWeight: 900, fontFamily: "JetBrains Mono", color: "var(--tx)", marginTop: 2 }}>{u.playerEvs || u.eventsCount || 0}</div>
+        </div>
+        <div style={{ background: "var(--c1)", padding: 8, border: "1px solid var(--b1)", textAlign: "center" }}>
+          <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em" }}>AVG STANDINGS</div>
+          <div style={{ fontSize: 15, fontWeight: 900, fontFamily: "JetBrains Mono", color: "var(--jd)", marginTop: 2 }}>{(u.standings || 0).toFixed(2)}</div>
+        </div>
+      </div>
+      {members.length > 0 && <>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginBottom: 6 }}>ACTIVE ROSTER ({members.length})</div>
+        <div style={{ maxHeight: 140, overflowY: "auto" }}>
+          {members.map(function (m) {
+            return <div key={m.id} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "6px 0", borderBottom: "1px solid var(--b2)", fontSize: 12
+            }}>
+              <span style={{ color: "var(--tx)", fontFamily: "Epilogue", fontWeight: 600 }}>{m.name}</span>
+              <span style={{ color: "var(--dm)", fontFamily: "JetBrains Mono", fontSize: 11 }}>{m.participation} pts · {(m.standings || 0).toFixed(2)} avg</span>
+            </div>;
+          })}
+        </div>
+      </>}
+    </div>;
+  }
+
+  // Dancer drawer: placements + external entries
+  var placements = (u.placements || []).slice().sort(function (a, b) {
+    // Local first, then by points descending
+    if (a.type !== b.type) return a.type === "local" ? -1 : 1;
+    return (b.pts || 0) - (a.pts || 0);
+  });
+  var local = placements.filter(function (x) { return x.type === "local"; });
+  var external = placements.filter(function (x) { return x.type === "external"; });
+
+  return <div style={{
+    background: "var(--c2)", padding: 12, borderTop: "1px solid var(--b1)",
+    animation: "fl .25s ease"
+  }}>
+    <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginBottom: 8 }}>SEASON BREAKDOWN</div>
+    {placements.length === 0 ? <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic", padding: "8px 0" }}>
+      No placements recorded yet.
+    </div> : <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 200, overflowY: "auto" }}>
+      {local.map(function (pl, i) {
+        return <div key={"l" + i} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "8px 10px", background: "var(--c1)", border: "1px solid var(--b1)",
+          fontSize: 12
+        }}>
+          <span style={{ color: "var(--tx)", fontFamily: "Epilogue", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, marginRight: 8 }}>
+            {pl.ev} <span style={{ color: "var(--dm)", fontSize: 10, fontFamily: "JetBrains Mono", marginLeft: 4 }}>{PLACE_LABEL[pl.pl] || ("#" + pl.pl)}</span>
+          </span>
+          <span style={{ color: "var(--gd)", fontWeight: 900, fontFamily: "JetBrains Mono", fontSize: 12, whiteSpace: "nowrap" }}>+{pl.pts || 0} PTS</span>
+        </div>;
+      })}
+      {external.length > 0 && <>
+        <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginTop: 8, marginBottom: 4 }}>EXTERNAL ENTRIES</div>
+        {external.map(function (pl, i) {
+          return <div key={"e" + i} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "8px 10px", background: "var(--c1)", border: "1px dashed var(--b1)",
+            fontSize: 12
+          }}>
+            <span style={{ color: "var(--tx)", fontFamily: "Epilogue", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, marginRight: 8 }}>
+              {pl.ev} <span style={{ color: "var(--dm)", fontSize: 10, fontFamily: "JetBrains Mono", marginLeft: 4 }}>{PLACE_LABEL[pl.pl] || ("#" + pl.pl)}</span>
+            </span>
+            <span style={{ color: "var(--gd)", fontWeight: 900, fontFamily: "JetBrains Mono", fontSize: 12, whiteSpace: "nowrap" }}>+{pl.pts || 0} PTS</span>
+          </div>;
+        })}
+      </>}
+    </div>}
+  </div>;
+}
+
 // ── Segmented pill toggle (Tailwind-style mode/sort selector) ──
 // Variant "primary" = active gets gold bg; "neutral" = active gets dark tx bg
 function SegmentedToggle(p) {
@@ -3106,6 +3266,7 @@ function LeaderboardEmbed(p) {
   var _wi = useState(cfg.window || "all"), winSel = _wi[0], setWinSel = _wi[1];
   var _fm = useState(cfg.format || "all"), fmtSel = _fm[0], setFmtSel = _fm[1];
   var _qs = useState(cfg.q || ""), qSel = _qs[0], setQSel = _qs[1];
+  var _ex = useState(null), expandedRowId = _ex[0], setExpandedRowId = _ex[1];
 
   // Filter event set by window + format
   var filteredEvents = useMemo(function () {
@@ -3174,15 +3335,7 @@ function LeaderboardEmbed(p) {
   }
 
   var sort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : cfg.sort);
-  var sortFns = {
-    events: function (a, b2) { return (b2.events || b2.eventsAttended || 0) - (a.events || a.eventsAttended || 0); },
-    cypherKings: function (a, b2) { return (b2.cypherKings || 0) - (a.cypherKings || 0); },
-    dpr: function (a, b2) { return (b2.dpr || 0) - (a.dpr || 0); },
-    wins: function (a, b2) { return (b2.wins || 0) - (a.wins || 0); },
-    winPct: function (a, b2) { return (b2.winPct || 0) - (a.winPct || 0); },
-    standings: function (a, b2) { return (b2.standings || 0) - (a.standings || 0); }
-  };
-  var sortFn = sortFns[sort] || sortFns.dpr;
+  var sortFn = makeSorter(sort);
   var list = (base || []).slice().sort(sortFn).slice(0, cfg.limit);
 
   var sortColors = {
@@ -3245,9 +3398,12 @@ function LeaderboardEmbed(p) {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 10, paddingBottom: 12, borderBottom: "1px solid var(--b1)" }}>
         <div style={{ minWidth: 0 }}>
           <h2 style={{
-            fontFamily: "Epilogue", fontSize: 20, color: "var(--gd)",
-            fontWeight: 900, textTransform: "uppercase", letterSpacing: ".12em", margin: 0, lineHeight: 1
-          }}>Live Rankings</h2>
+            fontFamily: "Epilogue", fontSize: 22,
+            background: "linear-gradient(90deg, #fbbf24 0%, #d97706 100%)",
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+            fontWeight: 900, textTransform: "uppercase", letterSpacing: ".06em", margin: 0, lineHeight: 1
+          }}>Cypher Rankings</h2>
           <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 4, letterSpacing: ".05em" }}>
             Current season aggregates
           </div>
@@ -3273,8 +3429,11 @@ function LeaderboardEmbed(p) {
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 10, paddingBottom: 12, borderBottom: "1px solid var(--b1)" }}>
       <div style={{ minWidth: 0 }}>
         <h2 style={{
-          fontFamily: "Epilogue", fontSize: 20, color: "var(--gd)",
-          fontWeight: 900, textTransform: "uppercase", letterSpacing: ".12em", margin: 0, lineHeight: 1,
+          fontFamily: "Epilogue", fontSize: 22,
+          background: "linear-gradient(90deg, #fbbf24 0%, #d97706 100%)",
+          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+          fontWeight: 900, textTransform: "uppercase", letterSpacing: ".06em", margin: 0, lineHeight: 1,
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
         }}>
           {modeTitle(mode, cfg.country)}
@@ -3382,41 +3541,53 @@ function LeaderboardEmbed(p) {
         var wins = winStreakCount(u);
         var trend = (mode === "players" || mode === "kings") ? computeTrend(u) : null;
         var showStats = mode === "players" || mode === "kings";
-        return <div style={{
-          padding: "10px 12px",
-          borderBottom: "1px solid var(--b2)"
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <RankBadge rank={rank} compact />
-            <Av name={displayName} sz={28} isCrew={isCrew} />
-            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-              <div style={{
-                fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-                display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap"
-              }}>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
-                {trend && <TrendArrow trend={trend} />}
-                <StreakPill wins={wins} />
-                <KingPill count={u.cypherKings} />
+        var canExpand = mode === "players" || mode === "kings" || mode === "crews";
+        var rowKey = u.id || displayName;
+        var isExpanded = expandedRowId === rowKey;
+        return <div style={{ borderBottom: "1px solid var(--b2)" }}>
+          <div onClick={canExpand ? function () { setExpandedRowId(isExpanded ? null : rowKey); } : undefined}
+            style={{
+              padding: "10px 12px", cursor: canExpand ? "pointer" : "default",
+              background: isExpanded ? "var(--c2)" : "transparent",
+              transition: "background .15s"
+            }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <RankBadge rank={rank} compact />
+              <Av name={displayName} sz={28} isCrew={isCrew} />
+              <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                <div style={{
+                  fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+                  display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap"
+                }}>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+                  {trend && <TrendArrow trend={trend} />}
+                  <StreakPill wins={wins} />
+                  <KingPill count={u.cypherKings} />
+                </div>
+                {subInfo && <div style={{
+                  fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+                }}>{subInfo}</div>}
+                {meta && <div style={{
+                  fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+                }}>{meta}</div>}
               </div>
-              {subInfo && <div style={{
-                fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-              }}>{subInfo}</div>}
-              {meta && <div style={{
-                fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-              }}>{meta}</div>}
+              {spark && spark.length > 0 && <div style={{ opacity: 0.8, flexShrink: 0 }}>
+                <Sparkline values={spark} width={50} height={18} color={sortCol} />
+              </div>}
+              <div style={{
+                fontSize: 15, fontWeight: 800, fontFamily: "JetBrains Mono",
+                color: sortCol, minWidth: 42, textAlign: "right"
+              }}>{valueOf(u)}</div>
+              {canExpand && <span style={{
+                color: "var(--dm)", fontSize: 11, fontFamily: "JetBrains Mono",
+                transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform .15s"
+              }}>⌃</span>}
             </div>
-            {spark && spark.length > 0 && <div style={{ opacity: 0.8, flexShrink: 0 }}>
-              <Sparkline values={spark} width={50} height={18} color={sortCol} />
-            </div>}
-            <div style={{
-              fontSize: 15, fontWeight: 800, fontFamily: "JetBrains Mono",
-              color: sortCol, minWidth: 42, textAlign: "right"
-            }}>{valueOf(u)}</div>
+            {showStats && (u.eventsAttended > 0) && <StatsTrio u={u} compact />}
           </div>
-          {showStats && (u.eventsAttended > 0) && <StatsTrio u={u} compact />}
+          {isExpanded && canExpand && <RowDrawer u={u} mode={mode} profiles={p.profiles} pR={stats.pR} />}
         </div>;
       }
 
@@ -3680,6 +3851,7 @@ function EmbedHelp() {
 // ═══════════════════════════════════════════════════════════════
 function RankingsView(p) {
   var _v = useState("dashboard"), view = _v[0], setView = _v[1];
+  var _ex = useState(null), expandedRowId = _ex[0], setExpandedRowId = _ex[1];
   var _a = useState("players"), mode = _a[0], setMode = _a[1];
   var _b = useState("dpr"), sort = _b[0], setSort = _b[1];
   var _c = useState(null), labelFilter = _c[0], setLabelFilter = _c[1];
@@ -3762,8 +3934,7 @@ function RankingsView(p) {
   }
 
   var effSort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : sort);
-  var kingsSortFn = function (a, b2) { return (b2.cypherKings || 0) - (a.cypherKings || 0); };
-  var effSortFn = effSort === "cypherKings" ? kingsSortFn : (sortFns[effSort] || sortFns.dpr);
+  var effSortFn = makeSorter(effSort);
   var list = (base || []).slice().sort(effSortFn);
 
   // Country options derived from profiles
@@ -4001,38 +4172,53 @@ function RankingsView(p) {
         var wins = winStreakCount(u);
         var trend = (mode === "players" || mode === "kings") ? computeTrend(u) : null;
         var showStats = (mode === "players" || mode === "kings") && u.eventsAttended > 0;
-        return <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--b2)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <RankBadge rank={rank} />
-            <Av name={displayName} sz={34} isCrew={mode === "crews"} />
-            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+        var canExpand = mode === "players" || mode === "kings" || mode === "crews";
+        var rowKey = u.id || displayName;
+        var isExpanded = expandedRowId === rowKey;
+        return <div style={{ borderBottom: "1px solid var(--b2)" }}>
+          <div onClick={canExpand ? function () { setExpandedRowId(isExpanded ? null : rowKey); } : undefined}
+            style={{
+              padding: "12px 16px", cursor: canExpand ? "pointer" : "default",
+              background: isExpanded ? "var(--c2)" : "transparent",
+              transition: "background .15s"
+            }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <RankBadge rank={rank} />
+              <Av name={displayName} sz={34} isCrew={mode === "crews"} />
+              <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                <div style={{
+                  fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+                  display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"
+                }}>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+                  {trend && <TrendArrow trend={trend} />}
+                  <StreakPill wins={wins} />
+                  <KingPill count={u.cypherKings} />
+                </div>
+                {subInfo && <div style={{
+                  fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2
+                }}>{subInfo}</div>}
+                <div style={{ marginTop: 3 }}>
+                  {mode === "players" ? <PlacementChips placements={u.placements} /> :
+                    <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{meta}</span>}
+                </div>
+              </div>
+              {spark && spark.length > 0 && <div style={{ opacity: 0.85, flexShrink: 0 }} title="Recent placement points">
+                <Sparkline values={spark} width={70} height={24} color={sortVal.col} />
+              </div>}
               <div style={{
-                fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-                display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"
-              }}>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
-                {trend && <TrendArrow trend={trend} />}
-                <StreakPill wins={wins} />
-                <KingPill count={u.cypherKings} />
-              </div>
-              {subInfo && <div style={{
-                fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2
-              }}>{subInfo}</div>}
-              <div style={{ marginTop: 3 }}>
-                {mode === "players" ? <PlacementChips placements={u.placements} /> :
-                  <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{meta}</span>}
-              </div>
+                fontSize: 18, fontWeight: 800, fontFamily: "JetBrains Mono",
+                color: sortVal.col, minWidth: 54, textAlign: "right"
+              }}>{valueOf(u)}</div>
+              {canExpand && <span style={{
+                color: "var(--dm)", fontSize: 12, fontFamily: "JetBrains Mono",
+                transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform .15s"
+              }}>⌃</span>}
             </div>
-            {spark && spark.length > 0 && <div style={{ opacity: 0.85, flexShrink: 0 }} title="Recent placement points">
-              <Sparkline values={spark} width={70} height={24} color={sortVal.col} />
-            </div>}
-            <div style={{
-              fontSize: 18, fontWeight: 800, fontFamily: "JetBrains Mono",
-              color: sortVal.col, minWidth: 54, textAlign: "right"
-            }}>{valueOf(u)}</div>
+            {showStats && <StatsTrio u={u} />}
           </div>
-          {showStats && <StatsTrio u={u} />}
+          {isExpanded && canExpand && <RowDrawer u={u} mode={mode} profiles={p.profiles} pR={fStats.pR} />}
         </div>;
       }
 
@@ -8749,13 +8935,19 @@ export default function App() {
 
   var embedCfg = readEmbedConfig();
 
-  if (!loaded) return <div style={Object.assign({}, CV, {
-    minHeight: "100vh", background: "var(--bg)",
-    display: "flex", alignItems: "center", justifyContent: "center"
-  })}>
-    <AppHead />
-    <div style={{ color: "var(--dm)", fontFamily: "Epilogue", fontSize: 18 }}>Loading…</div>
-  </div>;
+  if (!loaded) {
+    // Embed gets a skeleton-row loader to mimic the final layout
+    if (embedCfg && embedCfg.kind === "leaderboard") {
+      return <SkeletonLeaderboard rows={6} />;
+    }
+    return <div style={Object.assign({}, CV, {
+      minHeight: "100vh", background: "var(--bg)",
+      display: "flex", alignItems: "center", justifyContent: "center"
+    })}>
+      <AppHead />
+      <div style={{ color: "var(--dm)", fontFamily: "Epilogue", fontSize: 18 }}>Loading…</div>
+    </div>;
+  }
 
   // Embed mode short-circuits RoleGate + role views entirely.
   if (embedCfg) {
