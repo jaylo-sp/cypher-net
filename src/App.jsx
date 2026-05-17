@@ -363,8 +363,10 @@ button{min-height:40px;touch-action:manipulation;-webkit-tap-highlight-color:tra
 @keyframes spark{0%{transform:translate(-50%,-50%) scale(.6);opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(0);opacity:0}}
 @keyframes heatFlow{0%{background-position:0% 50%}100%{background-position:200% 50%}}
 ::-webkit-scrollbar{height:6px;width:6px}
-::-webkit-scrollbar-thumb{background:#d4d4d2;border-radius:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#d4d4d2;border-radius:3px;transition:background .15s}
 ::-webkit-scrollbar-thumb:hover{background:#b8b8b6}
+*{scrollbar-width:thin;scrollbar-color:#d4d4d2 transparent}
 select option{background:#ffffff;color:#0a0a0a}
 .noise{position:relative}
 .grid-bg{background-image:linear-gradient(rgba(58,31,203,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(58,31,203,.03) 1px,transparent 1px);background-size:32px 32px}
@@ -2025,20 +2027,30 @@ function SegmentedToggle(p) {
   </div>;
 }
 
-// ── Editorial rank badge: italic for ranks 4+, gold/silver/bronze chip for top 3 ──
+// ── Editorial rank badge: gradient + glow for podium, italic text for the rest ──
 function RankBadge(p) {
   var n = p.rank;
   if (n === 1 || n === 2 || n === 3) {
-    var bg = n === 1 ? "#fbbf24" : n === 2 ? "#cbd5e1" : "#cd7f32";
-    var color = n === 3 ? "#fff" : "#000";
+    var gradient, color, glow;
+    if (n === 1) {
+      gradient = "linear-gradient(135deg, #fbbf24 0%, #d97706 100%)";
+      color = "#000"; glow = "0 0 12px rgba(234,179,8,.45), inset 0 1px 0 rgba(255,255,255,.35)";
+    } else if (n === 2) {
+      gradient = "linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%)";
+      color = "#000"; glow = "0 0 8px rgba(148,163,184,.35), inset 0 1px 0 rgba(255,255,255,.4)";
+    } else {
+      gradient = "linear-gradient(135deg, #d97706 0%, #92400e 100%)";
+      color = "#fff7ed"; glow = "0 0 8px rgba(180,83,9,.35), inset 0 1px 0 rgba(255,255,255,.2)";
+    }
     return <span style={{
-      display: "inline-block",
-      padding: p.compact ? "2px 7px" : "3px 9px",
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      padding: p.compact ? "3px 8px" : "4px 10px",
       fontSize: p.compact ? 11 : 12,
       fontWeight: 900, fontFamily: "JetBrains Mono",
-      background: bg, color: color, letterSpacing: ".02em",
-      borderRadius: 0, flexShrink: 0, lineHeight: 1.4,
-      textAlign: "center", minWidth: p.compact ? 28 : 32
+      background: gradient, color: color, letterSpacing: ".02em",
+      borderRadius: 4, flexShrink: 0, lineHeight: 1.4,
+      textAlign: "center", minWidth: p.compact ? 28 : 32,
+      boxShadow: glow, textShadow: n === 1 ? "0 1px 1px rgba(0,0,0,.15)" : "none"
     }}>#{n}</span>;
   }
   // Italic plain text for the rest
@@ -3267,6 +3279,7 @@ function LeaderboardEmbed(p) {
   var _fm = useState(cfg.format || "all"), fmtSel = _fm[0], setFmtSel = _fm[1];
   var _qs = useState(cfg.q || ""), qSel = _qs[0], setQSel = _qs[1];
   var _ex = useState(null), expandedRowId = _ex[0], setExpandedRowId = _ex[1];
+  var _pg = useState(Math.min(25, cfg.limit || 25)), visibleCount = _pg[0], setVisibleCount = _pg[1];
 
   // Filter event set by window + format
   var filteredEvents = useMemo(function () {
@@ -3336,7 +3349,11 @@ function LeaderboardEmbed(p) {
 
   var sort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : cfg.sort);
   var sortFn = makeSorter(sort);
-  var list = (base || []).slice().sort(sortFn).slice(0, cfg.limit);
+  var fullSorted = (base || []).slice().sort(sortFn);
+  var hardCap = cfg.limit || 100;
+  var effectiveCount = Math.min(visibleCount, hardCap, fullSorted.length);
+  var list = fullSorted.slice(0, effectiveCount);
+  var hasMore = effectiveCount < Math.min(fullSorted.length, hardCap);
 
   var sortColors = {
     events: "var(--gd)", cypherKings: "var(--gd)", dpr: "var(--gd)", wins: "var(--ac)",
@@ -3598,6 +3615,20 @@ function LeaderboardEmbed(p) {
       });
     })()}
 
+    {/* Load More button (shown when more rows available within the hard cap) */}
+    {hasMore && <div style={{ marginTop: 8, textAlign: "center" }}>
+      <button onClick={function () { setVisibleCount(Math.min(visibleCount + 25, hardCap, fullSorted.length)); }} style={{
+        padding: "8px 20px", border: "1px solid var(--b1)", background: "var(--c1)",
+        color: "var(--tx)", fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700,
+        letterSpacing: ".1em", cursor: "pointer", textTransform: "uppercase", borderRadius: 6
+      }}>
+        Load {Math.min(25, Math.min(fullSorted.length, hardCap) - effectiveCount)} more
+        <span style={{ marginLeft: 8, color: "var(--dm)", fontWeight: 400 }}>
+          ({effectiveCount}/{Math.min(fullSorted.length, hardCap)})
+        </span>
+      </button>
+    </div>}
+
     {/* Footer: click-through to full Cypher Net */}
     <div style={{ marginTop: 14, textAlign: "center" }}>
       <a href={deepLink} target="_top" rel="noopener noreferrer" style={{
@@ -3852,6 +3883,7 @@ function EmbedHelp() {
 function RankingsView(p) {
   var _v = useState("dashboard"), view = _v[0], setView = _v[1];
   var _ex = useState(null), expandedRowId = _ex[0], setExpandedRowId = _ex[1];
+  var _pg = useState(25), visibleCount = _pg[0], setVisibleCount = _pg[1];
   var _a = useState("players"), mode = _a[0], setMode = _a[1];
   var _b = useState("dpr"), sort = _b[0], setSort = _b[1];
   var _c = useState(null), labelFilter = _c[0], setLabelFilter = _c[1];
@@ -3935,7 +3967,10 @@ function RankingsView(p) {
 
   var effSort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : sort);
   var effSortFn = makeSorter(effSort);
-  var list = (base || []).slice().sort(effSortFn);
+  var fullSorted = (base || []).slice().sort(effSortFn);
+  var effectiveCount = Math.min(visibleCount, fullSorted.length);
+  var list = fullSorted.slice(0, effectiveCount);
+  var hasMore = effectiveCount < fullSorted.length;
 
   // Country options derived from profiles
   var countries = ["All"];
@@ -4228,6 +4263,19 @@ function RankingsView(p) {
           isCrew={mode === "crews"} renderRow={renderRow} />;
       });
     })()}
+
+    {hasMore && <div style={{ marginTop: 10, textAlign: "center" }}>
+      <button onClick={function () { setVisibleCount(Math.min(visibleCount + 25, fullSorted.length)); }} style={{
+        padding: "10px 22px", border: "1px solid var(--b1)", background: "var(--c1)",
+        color: "var(--tx)", fontSize: 12, fontFamily: "JetBrains Mono", fontWeight: 700,
+        letterSpacing: ".1em", cursor: "pointer", textTransform: "uppercase", borderRadius: 8
+      }}>
+        Load {Math.min(25, fullSorted.length - effectiveCount)} more
+        <span style={{ marginLeft: 8, color: "var(--dm)", fontWeight: 400 }}>
+          ({effectiveCount}/{fullSorted.length})
+        </span>
+      </button>
+    </div>}
 
     {list.length > 0 && <div style={{ marginTop: 14, textAlign: "center" }}>
       <button onClick={function () {
