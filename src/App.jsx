@@ -355,6 +355,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;heigh
 button{min-height:40px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;font-family:Epilogue,system-ui,sans-serif}
 @keyframes fu{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes fl{from{opacity:0}to{opacity:1}}
+@keyframes drawerIn{from{opacity:0;transform:translateY(-4px);max-height:0}to{opacity:1;transform:translateY(0);max-height:600px}}
 @keyframes gw{0%,100%{box-shadow:0 0 14px rgba(163,82,0,.22)}50%{box-shadow:0 0 28px rgba(163,82,0,.5)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 @keyframes shimmer{0%{background-position:-200px 0}100%{background-position:200px 0}}
@@ -970,16 +971,38 @@ function TBtn(p) {
 }
 
 function Av(p) {
-  var c = p.name ? p.name.charCodeAt(0) % 360 : 0;
-  return <div style={{
-    width: p.sz || 34, height: p.sz || 34,
+  var _err = useState(false), imgError = _err[0], setImgError = _err[1];
+  var name = p.name || "?";
+  var sz = p.sz || 34;
+  var c = name.charCodeAt(0) % 360;
+  // 2-letter initials for sz >= 28 when name has multiple words; single letter otherwise
+  var initials;
+  var parts = name.trim().split(/\s+/).filter(Boolean);
+  if (sz >= 28 && parts.length >= 2) {
+    initials = (parts[0][0] + parts[1][0]).toUpperCase();
+  } else {
+    initials = (name[0] || "?").toUpperCase();
+  }
+  var hasImg = p.src && !imgError;
+  var commonStyle = {
+    width: sz, height: sz,
     borderRadius: p.isCrew ? 8 : "50%",
+    overflow: "hidden", flexShrink: 0,
+    border: "2px solid " + (p.isCrew ? "var(--cr)" : "var(--b1)")
+  };
+  if (hasImg) {
+    return <div style={commonStyle}>
+      <img src={p.src} alt={name} onError={function () { setImgError(true); }}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+    </div>;
+  }
+  return <div style={Object.assign({}, commonStyle, {
     background: "hsl(" + c + "," + (p.isCrew ? "50%,22%" : "55%,28%") + ")",
     display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: (p.sz || 34) * .42, fontWeight: 800, color: "#fff",
-    fontFamily: "Epilogue",
-    border: "2px solid " + (p.isCrew ? "var(--cr)" : "var(--b1)"), flexShrink: 0
-  }}>{(p.name || "?")[0].toUpperCase()}</div>;
+    fontSize: sz * (initials.length === 2 ? .36 : .42),
+    fontWeight: 800, color: "#fff",
+    fontFamily: "Epilogue", letterSpacing: initials.length === 2 ? ".02em" : "0"
+  })}>{initials}</div>;
 }
 
 function Back(p) {
@@ -1838,6 +1861,42 @@ function computeTrend(u) {
   return { dir: "stable", val: 0 };
 }
 
+// ── Match a row against a search query across name + crew ──
+function matchesSearch(u, qlc) {
+  if (!qlc) return true;
+  var name = (u.breakingName || u.name || "").toLowerCase();
+  if (name.indexOf(qlc) >= 0) return true;
+  // Player profile crews array
+  if (u.crews && u.crews.length) {
+    for (var i = 0; i < u.crews.length; i++) {
+      if ((u.crews[i].name || "").toLowerCase().indexOf(qlc) >= 0) return true;
+    }
+  }
+  return false;
+}
+
+// ── Highlight matching substring inside a name, returning JSX nodes ──
+function highlightMatch(text, query) {
+  if (!query || !text) return text;
+  var qlc = query.toLowerCase();
+  var tl = text.toLowerCase();
+  var idx = tl.indexOf(qlc);
+  if (idx < 0) return text;
+  var parts = [];
+  var i = 0;
+  while (idx >= 0) {
+    if (idx > i) parts.push(text.slice(i, idx));
+    parts.push(<mark key={"m" + idx} style={{
+      background: "rgba(234,179,8,.28)", color: "var(--gd)",
+      padding: "0 2px", borderRadius: 2, fontWeight: 800
+    }}>{text.slice(idx, idx + query.length)}</mark>);
+    i = idx + query.length;
+    idx = tl.indexOf(qlc, i);
+  }
+  if (i < text.length) parts.push(text.slice(i));
+  return <span>{parts}</span>;
+}
+
 // ── Tie-breaker chains: secondary fields kick in when the primary is tied ──
 var TIE_CHAINS = {
   dpr: ["standings", "wins", "eventsAttended"],
@@ -1961,7 +2020,8 @@ function RowDrawer(p) {
 
   return <div style={{
     background: "var(--c2)", padding: 12, borderTop: "1px solid var(--b1)",
-    animation: "fl .25s ease"
+    animation: "drawerIn .22s cubic-bezier(.215,.61,.355,1) both",
+    overflow: "hidden"
   }}>
     <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginBottom: 8 }}>SEASON BREAKDOWN</div>
     {placements.length === 0 ? <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic", padding: "8px 0" }}>
@@ -3020,6 +3080,40 @@ function LeaderboardDashboard(p) {
   var topCity = cityR[0];
   var topCountry = countryR[0];
 
+  // Most active by event count (separate from DPR ranking)
+  var mostActiveBreakers = pR.filter(function (x) { return (x.eventsAttended || 0) > 0; })
+    .slice().sort(function (a, b) { return (b.eventsAttended || 0) - (a.eventsAttended || 0); }).slice(0, 5);
+  var mostActiveCrews = cR.filter(function (x) { return (x.eventsCount || 0) > 0; })
+    .slice().sort(function (a, b) { return (b.eventsCount || 0) - (a.eventsCount || 0); }).slice(0, 5);
+
+  // Label-filtered leaderboards
+  var topBGirls = pR.filter(function (x) {
+    return (x.labels || []).indexOf("BGirl") >= 0 && (x.dpr || 0) > 0;
+  }).slice(0, 5);
+  var topYouth = pR.filter(function (x) {
+    return (x.labels || []).indexOf("Youth") >= 0 && (x.dpr || 0) > 0;
+  }).slice(0, 5);
+
+  // Outside-BC wins: count placements where the source event is outside British Columbia
+  // Use ev.details.state for app events; extEvents fall through (we don't have full geo on them)
+  var eventsById = {};
+  (p.events || []).forEach(function (e) { eventsById[e.name] = e; });
+  function isOutsideBC(plName) {
+    var ev = eventsById[plName];
+    if (!ev) return true; // assume external entries are out-of-area (mostly true for the Vancouver scene)
+    var d = ev.details || {};
+    if (d.state && d.state.toLowerCase().indexOf("bc") < 0 && d.state.toLowerCase().indexOf("british columbia") < 0) return true;
+    if (d.country && d.country.toLowerCase() !== "canada") return true;
+    return false;
+  }
+  var outsideBCBreakers = pR.map(function (x) {
+    var outWins = (x.placements || []).filter(function (pl) {
+      return pl.pl === 1 && isOutsideBC(pl.ev);
+    }).length;
+    return Object.assign({}, x, { _outWins: outWins });
+  }).filter(function (x) { return x._outWins > 0; })
+    .sort(function (a, b) { return b._outWins - a._outWins; }).slice(0, 5);
+
   // Judges from event jn maps
   var jMap = {};
   (p.events || []).forEach(function (ev) {
@@ -3187,30 +3281,35 @@ function LeaderboardDashboard(p) {
           })}
       </Card>
 
-      {/* Hot Region */}
-      <Card title="HOT REGION" subtitle="MOST ACTIVE" delay={0.20}>
-        {!topCountry && !topCity ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No regional data.</div> : <>
-          {topCountry && <div style={{ paddingBottom: 8, borderBottom: topCity ? "1px solid var(--b2)" : "none", marginBottom: topCity ? 8 : 0 }}>
-            <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".15em", marginBottom: 3 }}>COUNTRY</div>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6 }}>
-              <span style={{ fontSize: 16, fontFamily: "Epilogue", fontWeight: 800, color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{topCountry.name}</span>
-              <span style={{ fontSize: 13, fontFamily: "JetBrains Mono", fontWeight: 700, color: "var(--gd)", flexShrink: 0 }}>{topCountry.dpr || 0}</span>
-            </div>
-            <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 2 }}>
-              {(topCountry.players || 0) + " breakers · " + (topCountry.events || 0) + " entries"}
-            </div>
-          </div>}
-          {topCity && <div>
-            <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".15em", marginBottom: 3 }}>CITY</div>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6 }}>
-              <span style={{ fontSize: 16, fontFamily: "Epilogue", fontWeight: 800, color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{topCity.name}</span>
-              <span style={{ fontSize: 13, fontFamily: "JetBrains Mono", fontWeight: 700, color: "var(--gd)", flexShrink: 0 }}>{topCity.dpr || 0}</span>
-            </div>
-            <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 2 }}>
-              {(topCity.players || 0) + " breakers · " + (topCity.events || 0) + " entries"}
-            </div>
-          </div>}
-        </>}
+      {/* Top Cities — Vancouver-area focus, top 4 cities by DPR */}
+      <Card title="TOP CITIES" subtitle="BY DPR" delay={0.20}>
+        {cityR.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No regional data.</div>
+          : cityR.slice(0, 5).map(function (c, i) {
+            // Strip country suffix for cleaner display since this is Vancouver-area focused
+            var displayName = (c.name || "").replace(/, [^,]+$/, "");
+            return <div key={c.id || c.name} style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "6px 0",
+              borderBottom: i === Math.min(4, cityR.length - 1) ? "none" : "1px solid var(--b2)"
+            }}>
+              <span style={{
+                fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 800,
+                color: i === 0 ? "var(--gd)" : i === 1 ? "#9ca3af" : i === 2 ? "#cd7f32" : "var(--dm)",
+                minWidth: 22
+              }}>{"#" + (i + 1)}</span>
+              <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                <div style={{
+                  fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+                }}>{displayName}</div>
+                <div style={{
+                  fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono"
+                }}>{(c.players || 0) + " breakers · " + (c.wins || 0) + " wins"}</div>
+              </div>
+              <span style={{
+                fontSize: 13, fontWeight: 800, fontFamily: "JetBrains Mono", color: "var(--gd)", flexShrink: 0
+              }}>{c.dpr || 0}</span>
+            </div>;
+          })}
       </Card>
 
       {/* Activity timeline (bar chart) */}
@@ -3250,6 +3349,56 @@ function LeaderboardDashboard(p) {
                 <div style={{ width: pct + "%", height: "100%", background: col, transition: "width .6s ease" }} />
               </div>
             </div>;
+          })}
+      </Card>
+
+      {/* Most active breakers */}
+      <Card title="MOST ACTIVE" subtitle="BY EVENT COUNT" delay={0.29}>
+        {mostActiveBreakers.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
+          : mostActiveBreakers.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u}
+              sub={u.city || u.country}
+              value={u.eventsAttended + " ev"} valColor="var(--ac)" last={i === mostActiveBreakers.length - 1} />;
+          })}
+      </Card>
+
+      {/* Most active crews */}
+      <Card title="MOST ACTIVE CREWS" subtitle="BY EVENTS REP'D" delay={0.32}>
+        {mostActiveCrews.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
+          : mostActiveCrews.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u} isCrew
+              sub={(u.wins || 0) + " wins · " + (u.winPct || 0) + "% rate"}
+              value={u.eventsCount + " ev"} valColor="var(--cr)" last={i === mostActiveCrews.length - 1} />;
+          })}
+      </Card>
+
+      {/* Top BGirls */}
+      <Card title="TOP BGIRLS" subtitle="BY DPR" delay={0.35}>
+        {topBGirls.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No BGirls scored yet.</div>
+          : topBGirls.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u}
+              sub={u.city || u.country}
+              value={u.dpr || 0} valColor="var(--gd)" last={i === topBGirls.length - 1} />;
+          })}
+      </Card>
+
+      {/* Top Youth */}
+      <Card title="TOP YOUTH" subtitle="BY DPR" delay={0.38}>
+        {topYouth.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No Youth scored yet.</div>
+          : topYouth.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u}
+              sub={u.city || u.country}
+              value={u.dpr || 0} valColor="var(--gd)" last={i === topYouth.length - 1} />;
+          })}
+      </Card>
+
+      {/* Outside BC Wins — repping the Vancouver scene abroad */}
+      <Card title="REPPING ABROAD" subtitle="WINS OUTSIDE BC" delay={0.41}>
+        {outsideBCBreakers.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No out-of-province wins recorded.</div>
+          : outsideBCBreakers.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u}
+              sub={u.city || u.country}
+              value={u._outWins + (u._outWins === 1 ? " win" : " wins")} valColor="var(--rd)" last={i === outsideBCBreakers.length - 1} />;
           })}
       </Card>
     </div>
@@ -3342,8 +3491,7 @@ function LeaderboardEmbed(p) {
   if (qSel && qSel.trim()) {
     var qlc = qSel.toLowerCase().trim();
     base = base.filter(function (u) {
-      var n = (u.breakingName || u.name || "").toLowerCase();
-      return n.includes(qlc);
+      return matchesSearch(u, qlc);
     });
   }
 
@@ -3524,11 +3672,24 @@ function LeaderboardEmbed(p) {
     {showPodium && <Podium top3={list.slice(0, 3)} sort={sort} isCrew={isCrew} />}
 
     {(function () {
-      if (list.length === 0) return <Crd>
-        <div style={{ padding: 20, textAlign: "center", color: "var(--dm)", fontSize: 12 }}>
-          No data for this view.
-        </div>
-      </Crd>;
+      if (list.length === 0) {
+        var isSearching = qSel && qSel.trim();
+        return <div style={{
+          padding: 28, textAlign: "center",
+          border: "1px dashed var(--b1)", borderRadius: 10,
+          background: "var(--c2)", marginTop: 8
+        }}>
+          <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 8 }}>
+            {isSearching ? "No breakers or crews matching \"" + qSel + "\"" : "No data yet for this view."}
+          </div>
+          {isSearching && <button onClick={function () { setQSel(""); }} style={{
+            background: "transparent", border: "none", color: "var(--gd)",
+            fontFamily: "JetBrains Mono", fontSize: 11, fontWeight: 800,
+            letterSpacing: ".15em", textTransform: "uppercase",
+            textDecoration: "underline", textUnderlineOffset: 4, cursor: "pointer"
+          }}>Reset Search</button>}
+        </div>;
+      }
       var afterPodium = list.slice(showPodium ? 3 : 0);
       if (afterPodium.length === 0) return null;
 
@@ -3576,7 +3737,7 @@ function LeaderboardEmbed(p) {
                   fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
                   display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap"
                 }}>
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{highlightMatch(displayName, qSel)}</span>
                   {trend && <TrendArrow trend={trend} />}
                   <StreakPill wins={wins} />
                   <KingPill count={u.cypherKings} />
@@ -3678,8 +3839,8 @@ function EmbedHelp() {
   var _fm = useState(initial.fmt || "all"), fmtSel = _fm[0], setFmtSel = _fm[1];
   var _qq = useState(initial.q || ""), q = _qq[0], setQ = _qq[1];
   var _it = useState(initial.interactive !== false), interactive = _it[0], setInteractive = _it[1];
-  var _w = useState(viewSel === "dashboard" ? "640" : "380"), w = _w[0], setW = _w[1];
-  var _h = useState(viewSel === "dashboard" ? "900" : "700"), h = _h[0], setH = _h[1];
+  var _w = useState(viewSel === "dashboard" ? "880" : "380"), w = _w[0], setW = _w[1];
+  var _h = useState(viewSel === "dashboard" ? "1200" : "700"), h = _h[0], setH = _h[1];
   var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
 
   var origin = typeof window !== "undefined" ? window.location.origin : "https://cyphernet.vercel.app";
@@ -3956,12 +4117,11 @@ function RankingsView(p) {
     base = judgesR.filter(function (x) { return x.events > 0; });
   }
 
-  // Search filter — name match (uses breakingName or name)
+  // Search filter — matches name or crew
   if (q && q.trim()) {
     var qlc = q.toLowerCase().trim();
     base = (base || []).filter(function (u) {
-      var name = (u.breakingName || u.name || "").toLowerCase();
-      return name.includes(qlc);
+      return matchesSearch(u, qlc);
     });
   }
 
@@ -3982,11 +4142,9 @@ function RankingsView(p) {
   var MODE_TABS = [
     { id: "players", l: "Breakers", col: "var(--ac)", bg: "var(--ac2)" },
     { id: "crews", l: "Crews", col: "var(--cr)", bg: "var(--cr2)" },
-    { id: "kings", l: "👑 Kings", col: "var(--gd)", bg: "var(--gd2)" },
+    { id: "kings", l: "Kings", col: "var(--gd)", bg: "var(--gd2)" },
     { id: "judges", l: "Judges", col: "var(--jd)", bg: "var(--jd2)" },
-    { id: "cities", l: "Cities", col: "var(--jd)", bg: "var(--jd2)" },
-    { id: "states", l: "States", col: "var(--gn)", bg: "var(--gn2)" },
-    { id: "countries", l: "Countries", col: "var(--gd)", bg: "var(--gd2)" }
+    { id: "cities", l: "Cities", col: "var(--jd)", bg: "var(--jd2)" }
   ];
   var SORT_TABS = mode === "judges" ? [
     { id: "events", l: "Events", col: "var(--gd)", bg: "var(--gd2)" }
@@ -4176,11 +4334,26 @@ function RankingsView(p) {
 
     {(function () {
       var afterPodium = list.slice(showPodium ? 3 : 0);
-      if (list.length === 0) return <Crd>
-        <div style={{ padding: 36, textAlign: "center", color: "var(--dm)" }}>
-          {mode === "judges" ? "No judges recorded yet — set judge names on an event." : "No data yet"}
-        </div>
-      </Crd>;
+      if (list.length === 0) {
+        var isSearching = q && q.trim();
+        return <div style={{
+          padding: 36, textAlign: "center",
+          border: "1px dashed var(--b1)", borderRadius: 10,
+          background: "var(--c2)"
+        }}>
+          <div style={{ fontSize: 13, color: "var(--dm)", marginBottom: 10 }}>
+            {isSearching ? ("No breakers or crews matching \"" + q + "\"")
+              : mode === "judges" ? "No judges recorded yet — set judge names on an event."
+              : "No data yet"}
+          </div>
+          {isSearching && <button onClick={function () { setQ(""); }} style={{
+            background: "transparent", border: "none", color: "var(--gd)",
+            fontFamily: "JetBrains Mono", fontSize: 12, fontWeight: 800,
+            letterSpacing: ".15em", textTransform: "uppercase",
+            textDecoration: "underline", textUnderlineOffset: 4, cursor: "pointer"
+          }}>Reset Search</button>}
+        </div>;
+      }
       if (afterPodium.length === 0) return null;
 
       // Build tier cards (5 dancers each)
@@ -4225,7 +4398,7 @@ function RankingsView(p) {
                   fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
                   display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"
                 }}>
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{highlightMatch(displayName, q)}</span>
                   {trend && <TrendArrow trend={trend} />}
                   <StreakPill wins={wins} />
                   <KingPill count={u.cypherKings} />
@@ -5214,7 +5387,8 @@ function AudienceProfileDetail(p) {
                 {c.subLabel && <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", flexShrink: 0, marginLeft: 8 }}>{fmtD(c.subLabel)}</div>}
               </div>
               <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 8 }}>
-                <iframe src={"https://www.youtube.com/embed/" + c.ytId} title={c.label} allowFullScreen loading="lazy"
+                <iframe src={"https://www.youtube.com/embed/" + c.ytId + (i === 0 ? "?autoplay=1&mute=1&playsinline=1&rel=0" : "?rel=0")} title={c.label} allowFullScreen loading="lazy"
+                  allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
                   style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 }} />
               </div>
             </div>;
