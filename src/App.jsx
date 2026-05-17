@@ -2724,12 +2724,27 @@ function LeaderboardEmbed(p) {
 }
 
 function EmbedHelp() {
-  var _m = useState("players"), mode = _m[0], setMode = _m[1];
-  var _c = useState("All"), country = _c[0], setCountry = _c[1];
-  var _s = useState("dpr"), sort = _s[0], setSort = _s[1];
-  var _l = useState("10"), limit = _l[0], setLimit = _l[1];
-  var _t = useState("dark"), theme = _t[0], setTheme = _t[1];
-  var _cp = useState(false), compact = _cp[0], setCompact = _cp[1];
+  // Pre-fill from URL params if present (e.g., "Embed this leaderboard" deep links from RankingsView)
+  var initial = (function () {
+    if (typeof window === "undefined") return {};
+    try {
+      var sp = new URLSearchParams(window.location.search);
+      return {
+        mode: sp.get("mode") || "players",
+        country: sp.get("country") || "All",
+        sort: sp.get("sort") || "dpr",
+        limit: sp.get("limit") || "10",
+        theme: sp.get("theme") === "light" ? "light" : "dark",
+        compact: sp.get("compact") === "1"
+      };
+    } catch (e) { return {}; }
+  })();
+  var _m = useState(initial.mode || "players"), mode = _m[0], setMode = _m[1];
+  var _c = useState(initial.country || "All"), country = _c[0], setCountry = _c[1];
+  var _s = useState(initial.sort || "dpr"), sort = _s[0], setSort = _s[1];
+  var _l = useState(initial.limit || "10"), limit = _l[0], setLimit = _l[1];
+  var _t = useState(initial.theme || "dark"), theme = _t[0], setTheme = _t[1];
+  var _cp = useState(!!initial.compact), compact = _cp[0], setCompact = _cp[1];
   var _w = useState("380"), w = _w[0], setW = _w[1];
   var _h = useState("700"), h = _h[0], setH = _h[1];
   var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
@@ -3087,6 +3102,26 @@ function RankingsView(p) {
         {mode === "judges" ? "No judges recorded yet — set judge names on an event." : "No data yet"}
       </div>}
     </Crd>
+
+    {list.length > 0 && <div style={{ marginTop: 14, textAlign: "center" }}>
+      <button onClick={function () {
+        if (typeof window === "undefined") return;
+        var sp = new URLSearchParams();
+        sp.set("embed", "help");
+        sp.set("mode", mode);
+        if (countryFilter !== "All") sp.set("country", countryFilter);
+        sp.set("sort", effSort);
+        window.open("/?" + sp.toString(), "_blank");
+      }} style={{
+        padding: "8px 16px", borderRadius: 8,
+        background: "transparent", color: "var(--dm)",
+        border: "1px dashed var(--b1)",
+        fontSize: 12, fontFamily: "JetBrains Mono", letterSpacing: ".08em",
+        cursor: "pointer"
+      }} title="Open the embed builder with these filters pre-filled">
+        📺 EMBED THIS LEADERBOARD ON YOUR SITE
+      </button>
+    </div>}
   </div>);
 }
 
