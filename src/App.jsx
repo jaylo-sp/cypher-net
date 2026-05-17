@@ -1836,21 +1836,59 @@ function computeTrend(u) {
   return { dir: "stable", val: 0 };
 }
 
-// ── Editorial rank badge (sharp corners, gold/silver/bronze for top 3) ──
+// ── Segmented pill toggle (Tailwind-style mode/sort selector) ──
+// Variant "primary" = active gets gold bg; "neutral" = active gets dark tx bg
+function SegmentedToggle(p) {
+  var options = p.options || [];
+  var variant = p.variant || "neutral";
+  return <div style={{
+    display: "inline-flex",
+    background: "var(--c2)", padding: 3, borderRadius: 8,
+    border: "1px solid var(--b1)", gap: 2, alignSelf: "flex-start"
+  }}>
+    {options.map(function (opt) {
+      var active = opt.id === p.value;
+      var activeBg = variant === "primary" ? "var(--gd)" : "var(--tx)";
+      var activeFg = variant === "primary" ? "#000" : "var(--bg)";
+      return <button key={opt.id} onClick={function () { p.onChange(opt.id); }} style={{
+        padding: p.compact ? "5px 9px" : "6px 11px",
+        background: active ? activeBg : "transparent",
+        color: active ? activeFg : "var(--dm)",
+        border: "none", borderRadius: 6,
+        fontSize: p.compact ? 10 : 11, fontWeight: 800, fontFamily: "JetBrains Mono",
+        letterSpacing: ".08em", textTransform: "uppercase",
+        cursor: "pointer", whiteSpace: "nowrap",
+        transition: "background .15s, color .15s",
+        boxShadow: active ? "0 1px 2px rgba(0,0,0,.08)" : "none"
+      }}>{opt.l}</button>;
+    })}
+  </div>;
+}
+
+// ── Editorial rank badge: italic for ranks 4+, gold/silver/bronze chip for top 3 ──
 function RankBadge(p) {
   var n = p.rank;
-  var bg = "var(--c2)", color = "var(--tx)";
-  if (n === 1) { bg = "#fbbf24"; color = "#000"; }
-  else if (n === 2) { bg = "#cbd5e1"; color = "#000"; }
-  else if (n === 3) { bg = "#cd7f32"; color = "#fff"; }
+  if (n === 1 || n === 2 || n === 3) {
+    var bg = n === 1 ? "#fbbf24" : n === 2 ? "#cbd5e1" : "#cd7f32";
+    var color = n === 3 ? "#fff" : "#000";
+    return <span style={{
+      display: "inline-block",
+      padding: p.compact ? "2px 7px" : "3px 9px",
+      fontSize: p.compact ? 11 : 12,
+      fontWeight: 900, fontFamily: "JetBrains Mono",
+      background: bg, color: color, letterSpacing: ".02em",
+      borderRadius: 0, flexShrink: 0, lineHeight: 1.4,
+      textAlign: "center", minWidth: p.compact ? 28 : 32
+    }}>#{n}</span>;
+  }
+  // Italic plain text for the rest
   return <span style={{
     display: "inline-block",
-    padding: p.compact ? "2px 7px" : "3px 9px",
-    fontSize: p.compact ? 11 : 12,
-    fontWeight: 900, fontFamily: "JetBrains Mono",
-    background: bg, color: color, letterSpacing: ".02em",
-    borderRadius: 0,
-    flexShrink: 0, lineHeight: 1.4
+    fontSize: p.compact ? 16 : 18,
+    fontWeight: 900, fontStyle: "italic", fontFamily: "Epilogue",
+    color: "var(--dm)", letterSpacing: ".01em",
+    flexShrink: 0, lineHeight: 1, textAlign: "center",
+    minWidth: p.compact ? 28 : 36
   }}>#{n}</span>;
 }
 
@@ -3204,12 +3242,15 @@ function LeaderboardEmbed(p) {
       boxSizing: "border-box"
     })}>
       <AppHead />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 10, paddingBottom: 12, borderBottom: "1px solid var(--b1)" }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", marginBottom: 2 }}>
-            ◫ DASHBOARD
+          <h2 style={{
+            fontFamily: "Epilogue", fontSize: 20, color: "var(--gd)",
+            fontWeight: 900, textTransform: "uppercase", letterSpacing: ".12em", margin: 0, lineHeight: 1
+          }}>Live Rankings</h2>
+          <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 4, letterSpacing: ".05em" }}>
+            Current season aggregates
           </div>
-          <h2 style={{ fontFamily: "Epilogue", fontSize: 18, color: "var(--tx)", margin: 0 }}>Cypher Net</h2>
         </div>
         <a href={(typeof window !== "undefined" ? window.location.origin : "")} target="_top" rel="noopener noreferrer"
           title="Open Cypher Net" style={{
@@ -3229,14 +3270,18 @@ function LeaderboardEmbed(p) {
     boxSizing: "border-box"
   })}>
     <AppHead />
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 10, paddingBottom: 12, borderBottom: "1px solid var(--b1)" }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", marginBottom: 2 }}>
-          🏆 LEADERBOARD
-        </div>
-        <h2 style={{ fontFamily: "Epilogue", fontSize: 18, color: "var(--tx)", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <h2 style={{
+          fontFamily: "Epilogue", fontSize: 20, color: "var(--gd)",
+          fontWeight: 900, textTransform: "uppercase", letterSpacing: ".12em", margin: 0, lineHeight: 1,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+        }}>
           {modeTitle(mode, cfg.country)}
         </h2>
+        <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 4, letterSpacing: ".05em" }}>
+          Live · updates as scores change
+        </div>
       </div>
       <a href={deepLink} target="_top" rel="noopener noreferrer"
         title="Open Cypher Net" style={{
@@ -3245,43 +3290,54 @@ function LeaderboardEmbed(p) {
         }}>CYPHER NET ↗</a>
     </div>
 
-    {/* Interactive filter chips (hide via ?interactive=0) */}
+    {/* Interactive filter toggles (hide via ?interactive=0) */}
     {cfg.interactive && <>
-      <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
-        {[
-          { id: "players", l: "Breakers" },
-          { id: "crews", l: "Crews" },
-          { id: "kings", l: "👑 Kings" },
-          { id: "judges", l: "Judges" }
-        ].map(function (m) { return chip(m.l, mode === m.id, function () { setMode(m.id); }); })}
+      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+        <SegmentedToggle
+          compact
+          options={[
+            { id: "players", l: "Breakers" },
+            { id: "crews", l: "Crews" },
+            { id: "kings", l: "Kings" },
+            { id: "judges", l: "Judges" }
+          ]}
+          value={mode} onChange={setMode} variant="neutral" />
+        <SegmentedToggle
+          compact
+          options={[
+            { id: "all", l: "All time" },
+            { id: "year", l: "Year" },
+            { id: "6mo", l: "6mo" },
+            { id: "30d", l: "30d" }
+          ]}
+          value={winSel} onChange={setWinSel} variant="primary" />
       </div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
-        {[
-          { id: "all", l: "All-time" },
-          { id: "year", l: "This year" },
-          { id: "6mo", l: "6mo" },
-          { id: "30d", l: "30d" }
-        ].map(function (w) { return chip("⏱ " + w.l, winSel === w.id, function () { setWinSel(w.id); }); })}
-      </div>
-      {(mode === "players" || mode === "crews" || mode === "kings") && <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
-        {[
-          { id: "all", l: "All formats" },
-          { id: "solo", l: "Solo" },
-          { id: "2v2", l: "2v2" },
-          { id: "3v3", l: "3v3" },
-          { id: "4v4", l: "4v4" },
-          { id: "crew", l: "Crew" },
-          { id: "draft", l: "Draft" }
-        ].map(function (f) { return chip(f.l, fmtSel === f.id, function () { setFmtSel(f.id); }, "var(--cr)"); })}
+      {(mode === "players" || mode === "crews" || mode === "kings") && <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+        <SegmentedToggle
+          compact
+          options={[
+            { id: "all", l: "All formats" },
+            { id: "solo", l: "Solo" },
+            { id: "2v2", l: "2v2" },
+            { id: "3v3", l: "3v3" },
+            { id: "4v4", l: "4v4" },
+            { id: "crew", l: "Crew" },
+            { id: "draft", l: "Draft" }
+          ]}
+          value={fmtSel} onChange={setFmtSel} variant="neutral" />
       </div>}
       <div style={{ position: "relative", marginBottom: 12 }}>
         <input value={qSel} onChange={function (e) { setQSel(e.target.value); }}
-          placeholder="🔍 Search…"
+          placeholder="Search…"
           style={{
-            width: "100%", padding: "8px 32px 8px 12px", fontSize: 12,
-            background: "var(--inp)", border: "1px solid var(--b1)", borderRadius: 6,
+            width: "100%", padding: "8px 32px 8px 30px", fontSize: 12,
+            background: "var(--inp)", border: "1px solid var(--b1)", borderRadius: 8,
             color: "var(--tx)", outline: "none", fontFamily: "Epilogue", boxSizing: "border-box"
           }} />
+        <span style={{
+          position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
+          color: "var(--dm)", fontSize: 12, pointerEvents: "none"
+        }}>⌕</span>
         {qSel && <button onClick={function () { setQSel(""); }} style={{
           position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
           background: "none", border: "none", color: "var(--dm)", cursor: "pointer", fontSize: 14
@@ -3804,43 +3860,26 @@ function RankingsView(p) {
       countryR={fStats.countryR} events={p.events} />}
 
     {view === "list" && <>
-    <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
-      {MODE_TABS.map(function (t) {
-        var active = mode === t.id;
-        return <button key={t.id} onClick={function () { setMode(t.id) }} style={{
-          flex: "0 0 auto", padding: "9px 14px", borderRadius: 8,
-          border: "2px solid " + (active ? t.col : "var(--b1)"),
-          background: active ? t.bg : "transparent",
-          color: active ? t.col : "var(--dm)",
-          fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue",
-          textTransform: "uppercase", letterSpacing: ".05em", whiteSpace: "nowrap"
-        }}>{t.l}</button>;
-      })}
-    </div>
-
-    <div style={{ display: "flex", gap: 6, marginBottom: 14, paddingBottom: 4, alignItems: "center", flexWrap: "wrap" }}>
-      {SORT_TABS.map(function (s) {
-        var active = effSort === s.id;
-        return <button key={s.id} onClick={function () { setSort(s.id) }} style={{
-          flex: "0 0 auto", padding: "7px 14px", borderRadius: 7,
-          border: "1px solid " + (active ? s.col : "var(--b1)"),
-          background: active ? s.bg : "transparent",
-          color: active ? s.col : "var(--dm)",
-          fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "JetBrains Mono", whiteSpace: "nowrap"
-        }}>{s.l}</button>;
-      })}
+    <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <SegmentedToggle
+        options={MODE_TABS.map(function (t) { return { id: t.id, l: t.l }; })}
+        value={mode} onChange={setMode} variant="neutral" />
+      <SegmentedToggle
+        options={SORT_TABS.map(function (s) { return { id: s.id, l: s.l }; })}
+        value={effSort} onChange={setSort} variant="primary" />
       {showCountryFilter && countries.length > 1 && <select
         value={countryFilter}
         onChange={function (e) { setCountryFilter(e.target.value); }}
         style={{
-          padding: "7px 10px", borderRadius: 7,
-          background: countryFilter === "All" ? "transparent" : "var(--c2)",
+          padding: "7px 10px", borderRadius: 8,
+          background: countryFilter === "All" ? "var(--c2)" : "var(--c1)",
           color: countryFilter === "All" ? "var(--dm)" : "var(--tx)",
-          border: "1px solid " + (countryFilter === "All" ? "var(--b1)" : "var(--ac)"),
-          fontSize: 12, fontFamily: "JetBrains Mono", fontWeight: 700, cursor: "pointer"
+          border: "1px solid var(--b1)",
+          fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700, cursor: "pointer",
+          letterSpacing: ".05em"
         }}>
         {countries.map(function (c) {
-          return <option key={c} value={c}>{c === "All" ? "🌍 All countries" : c}</option>;
+          return <option key={c} value={c}>{c === "All" ? "All countries" : c}</option>;
         })}
       </select>}
     </div>
