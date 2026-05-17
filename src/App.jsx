@@ -487,6 +487,19 @@ function seedExample() {
 function fmtD(iso) { if (!iso) return ""; return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) }
 function isPast(iso) { return iso ? new Date(iso) < new Date() : false }
 function ytId(url) { if (!url) return null; var m = url.match(/(?:youtu\.be\/|v=)([a-zA-Z0-9_-]{11})/); return m ? m[1] : null }
+
+// Strip HTML tags + verify the URL points at a youtube/youtu.be host. Returns null
+// for anything we won't render. Use on every user-supplied YouTube URL before it
+// hits storage so a copied <script> tag or a wrong-platform link can't poison rows.
+function validateAndSanitizeYoutube(input) {
+  if (!input) return null;
+  var trimmed = String(input).trim();
+  if (!trimmed) return null;
+  if (!/youtube\.com|youtu\.be/i.test(trimmed)) return null;
+  // Remove any HTML markup the user may have pasted
+  var sanitized = trimmed.replace(/<\/?[^>]+(>|$)/g, "");
+  return sanitized || null;
+}
 function shuf(a) { return a.slice().sort(function () { return Math.random() - .5 }); }
 
 // Read deep-link params (?event=, ?dancer=, ?crew=). Returns { eventId, dancerId, crewId }.
@@ -1139,6 +1152,57 @@ function Modal(p) {
       {p.children}
     </div>
   </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MOBILE-AUTOPLAY YOUTUBE PLAYER
+// Parses messy YouTube URLs → embeds with mobile autoplay bypass
+// (autoplay+mute+playsinline) and a tap-to-unmute overlay.
+// ═══════════════════════════════════════════════════════════════
+function MobileAutoplayYoutube(p) {
+  var _m = useState(true), isMuted = _m[0], setMuted = _m[1];
+  var _id = useState(null), vid = _id[0], setVid = _id[1];
+  useEffect(function () {
+    if (!p.url) { setVid(null); return; }
+    // Loose regex covering watch?v=, youtu.be, shorts, embeds
+    var m = String(p.url).match(/(?:youtu\.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=|shorts\/)([^#&?\/]{11})/);
+    setVid(m ? m[1] : null);
+  }, [p.url]);
+
+  if (!vid) {
+    return <div style={{
+      width: "100%", aspectRatio: "16/9", background: "var(--c2)",
+      border: "1px dashed var(--b1)", borderRadius: 10,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      color: "var(--dm)", fontSize: 11, fontFamily: "JetBrains Mono", letterSpacing: ".1em"
+    }}>⚠ INVALID VIDEO LINK</div>;
+  }
+  var params = "autoplay=" + (p.autoplay === false ? "0" : "1") +
+    "&mute=" + (isMuted ? "1" : "0") +
+    "&playsinline=1&controls=1&modestbranding=1&rel=0";
+  var src = "https://www.youtube.com/embed/" + vid + "?" + params;
+  return <div style={{
+    position: "relative", width: "100%", aspectRatio: "16/9",
+    background: "#000", borderRadius: 10, overflow: "hidden",
+    border: "1px solid var(--b1)"
+  }}>
+    <iframe key={vid + "_" + (isMuted ? "m" : "u")}
+      src={src} title={p.title || "clip"}
+      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+      allowFullScreen loading="lazy"
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }} />
+    {isMuted && <button type="button"
+      onClick={function (e) { e.preventDefault(); e.stopPropagation(); setMuted(false); }}
+      style={{
+        position: "absolute", bottom: 10, left: 10,
+        padding: "6px 11px", borderRadius: 6,
+        background: "var(--gd)", color: "#000",
+        border: "none", cursor: "pointer", fontWeight: 800,
+        fontSize: 10, fontFamily: "JetBrains Mono", letterSpacing: ".12em",
+        textTransform: "uppercase",
+        boxShadow: "0 4px 12px rgba(0,0,0,.4)"
+      }}>🔊 TAP TO UNMUTE</button>}
+  </div>;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5283,8 +5347,15 @@ function OwnerEditPanel(p) {
   }, [p.extras]);
 
   function save() {
+    // Sanitize YouTube URL — strip HTML, verify host. Reject silently if non-YouTube.
+    var ytTrim = (yt || "").trim();
+    var ytClean = ytTrim ? validateAndSanitizeYoutube(ytTrim) : "";
+    if (ytTrim && !ytClean) {
+      setMsg("✕ YouTube URL didn't look right. Use a youtube.com or youtu.be link.");
+      return;
+    }
     setBusy(true); setMsg("");
-    var fields = { bio: bio, youtube: yt, instagram: ig, tiktok: tt };
+    var fields = { bio: bio, youtube: ytClean, instagram: ig, tiktok: tt };
     Promise.resolve(profileExtras.set(p.profileId, fields)).then(function (res) {
       setBusy(false);
       if (res && res.error) setMsg("✕ " + res.error);
@@ -5741,11 +5812,7 @@ function AudienceProfileDetail(p) {
                 </div>
                 {c.subLabel && <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", flexShrink: 0, marginLeft: 8 }}>{fmtD(c.subLabel)}</div>}
               </div>
-              <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 8 }}>
-                <iframe src={"https://www.youtube.com/embed/" + c.ytId + (i === 0 ? "?autoplay=1&mute=1&playsinline=1&rel=0" : "?rel=0")} title={c.label} allowFullScreen loading="lazy"
-                  allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-                  style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 }} />
-              </div>
+              <MobileAutoplayYoutube url={"https://youtu.be/" + c.ytId} title={c.label} autoplay={i === 0} />
             </div>;
           })}
         </Crd>;
@@ -8434,10 +8501,16 @@ function EventDetailView(p) {
             var current = pl.clip || "";
             var next = window.prompt("YouTube clip URL for " + pl.name + " in this event:\n(Leave blank to remove)", current);
             if (next === null) return;
+            var trimmed = next.trim();
+            var clean = trimmed ? validateAndSanitizeYoutube(trimmed) : "";
+            if (trimmed && !clean) {
+              if (typeof bbToast === "function") bbToast("⚠ That doesn't look like a YouTube URL — not saved.");
+              return;
+            }
             upd(ev.id, function (d) {
               var idx = d.players.findIndex(function (x) { return x.id === pl.id; });
               if (idx >= 0) {
-                d.players[idx] = Object.assign({}, d.players[idx], { clip: next.trim() || undefined });
+                d.players[idx] = Object.assign({}, d.players[idx], { clip: clean || undefined });
               }
               return d;
             });
