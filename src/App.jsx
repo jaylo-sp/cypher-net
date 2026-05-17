@@ -506,7 +506,8 @@ function readEmbedConfig() {
       window: sp.get("window") || "all",
       format: sp.get("format") || "all",
       q: sp.get("q") || "",
-      interactive: sp.get("interactive") !== "0"  // default ON — embed has filter chips
+      interactive: sp.get("interactive") !== "0",  // default ON — embed has filter chips
+      view: sp.get("view") || "dashboard"  // "dashboard" | "list"
     };
   } catch (e) { return null; }
 }
@@ -2773,6 +2774,293 @@ function modeTitle(mode, country) {
   return base;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// LEADERBOARD DASHBOARD (Salesforce-style: grid of mini stat cards)
+// ═══════════════════════════════════════════════════════════════
+function LeaderboardDashboard(p) {
+  var compact = !!p.compact;
+  var origin = typeof window !== "undefined" ? window.location.origin : "";
+
+  // Pull derived datasets
+  var pR = (p.pR || []).slice().sort(function (a, b) { return (b.dpr || 0) - (a.dpr || 0); });
+  var cR = (p.cR || []).slice().sort(function (a, b) { return (b.dpr || 0) - (a.dpr || 0); });
+  var cityR = (p.cityR || []).slice().sort(function (a, b) { return (b.dpr || 0) - (a.dpr || 0); });
+  var countryR = (p.countryR || []).slice().sort(function (a, b) { return (b.dpr || 0) - (a.dpr || 0); });
+
+  // KPI numbers
+  var totalBreakers = pR.filter(function (x) { return (x.dpr || 0) > 0 || (x.eventsAttended || 0) > 0; }).length;
+  var totalCrews = cR.filter(function (x) { return (x.dpr || 0) > 0 || (x.eventsCount || 0) > 0; }).length;
+  var totalEvents = (p.events || []).length;
+  var totalMatches = 0;
+  (p.events || []).forEach(function (e) {
+    (e.bracket || []).forEach(function (rd) {
+      (rd || []).forEach(function (m) { if (m && m.p1 && m.p2) totalMatches++; });
+    });
+  });
+
+  // Derived lists
+  var top5Breakers = pR.filter(function (x) { return (x.dpr || 0) > 0; }).slice(0, 5);
+  var top5Crews = cR.filter(function (x) { return (x.dpr || 0) > 0; }).slice(0, 5);
+  var kings = pR.filter(function (x) { return (x.cypherKings || 0) > 0; })
+    .sort(function (a, b) { return (b.cypherKings || 0) - (a.cypherKings || 0); }).slice(0, 5);
+  var totalKingCrowns = pR.reduce(function (s, x) { return s + (x.cypherKings || 0); }, 0);
+  var onFire = pR.filter(function (x) { return winStreakCount(x) >= 2; })
+    .map(function (x) { return Object.assign({}, x, { _w: winStreakCount(x) }); })
+    .sort(function (a, b) { return b._w - a._w; }).slice(0, 5);
+  var topCity = cityR[0];
+  var topCountry = countryR[0];
+
+  // Judges from event jn maps
+  var jMap = {};
+  (p.events || []).forEach(function (ev) {
+    if (!ev.jn) return;
+    for (var i = 0; i < (ev.nj || 0); i++) {
+      var nm = (ev.jn[i] || "").trim();
+      if (!nm) continue;
+      jMap[nm] = (jMap[nm] || 0) + 1;
+    }
+  });
+  var topJudges = Object.keys(jMap).map(function (k) { return { name: k, events: jMap[k] }; })
+    .sort(function (a, b) { return b.events - a.events; }).slice(0, 5);
+
+  // Activity timeline: events per month, last 6 months
+  var now = new Date();
+  var months = [];
+  for (var m = 5; m >= 0; m--) {
+    var d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+    months.push({ key: d.getFullYear() + "-" + (d.getMonth() + 1), label: d.toLocaleString("default", { month: "short" }), count: 0 });
+  }
+  (p.events || []).forEach(function (ev) {
+    if (!ev.dt) return;
+    var ed = new Date(ev.dt);
+    if (isNaN(ed.getTime())) return;
+    var key = ed.getFullYear() + "-" + (ed.getMonth() + 1);
+    var bucket = months.find(function (mm) { return mm.key === key; });
+    if (bucket) bucket.count++;
+  });
+  var monthsMax = Math.max.apply(null, months.map(function (mm) { return mm.count; }).concat([1]));
+
+  // Format breakdown
+  var fmtCounts = {};
+  (p.events || []).forEach(function (ev) {
+    if (!ev.type) return;
+    var key = ev.type === "solo" ? "Solo"
+      : (ev.type === "2v2" || ev.type === "3v3" || ev.type === "4v4") ? ev.type
+      : ev.type === "crew" ? "Crew"
+      : isDraftFormat(ev.type) ? "Draft"
+      : "Other";
+    fmtCounts[key] = (fmtCounts[key] || 0) + 1;
+  });
+  var fmtList = Object.keys(fmtCounts).map(function (k) { return { name: k, count: fmtCounts[k] }; })
+    .sort(function (a, b) { return b.count - a.count; });
+  var fmtTotal = fmtList.reduce(function (s, x) { return s + x.count; }, 0);
+
+  // ── Inline mini-components ──
+  function KpiCard(props) {
+    return <div style={{
+      background: "var(--c1)", border: "1px solid var(--b1)", padding: compact ? "12px 14px" : "16px 18px",
+      borderRadius: 0, minWidth: 0
+    }}>
+      <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".18em", marginBottom: 6 }}>{props.label}</div>
+      <div style={{ fontSize: compact ? 26 : 34, fontFamily: "Epilogue", fontWeight: 800, color: props.color || "var(--tx)", lineHeight: 1 }}>{props.value}</div>
+      {props.sub && <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 4 }}>{props.sub}</div>}
+    </div>;
+  }
+
+  function MiniRow(props) {
+    var r = props.rank;
+    var u = props.u;
+    var displayName = u.breakingName || u.name;
+    return <div style={{
+      display: "flex", alignItems: "center", gap: 8, padding: "6px 0",
+      borderBottom: props.last ? "none" : "1px solid var(--b2)"
+    }}>
+      <span style={{
+        fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 800,
+        color: r === 1 ? "var(--gd)" : r === 2 ? "#9ca3af" : r === 3 ? "#cd7f32" : "var(--dm)",
+        minWidth: 22
+      }}>{"#" + r}</span>
+      <Av name={displayName} sz={22} isCrew={!!props.isCrew} />
+      <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+        <div style={{
+          fontSize: 12, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+        }}>{displayName}</div>
+        {props.sub && <div style={{
+          fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+        }}>{props.sub}</div>}
+      </div>
+      <span style={{
+        fontSize: 13, fontWeight: 800, fontFamily: "JetBrains Mono", color: props.valColor || "var(--tx)",
+        flexShrink: 0
+      }}>{props.value}</span>
+    </div>;
+  }
+
+  function Card(props) {
+    return <div style={{
+      background: "var(--c1)", border: "1px solid var(--b1)", padding: compact ? "12px 14px" : "16px 18px",
+      borderRadius: 0, minWidth: 0, animation: "fu .3s ease both", animationDelay: (props.delay || 0) + "s"
+    }}>
+      <div style={{
+        display: "flex", alignItems: "baseline", justifyContent: "space-between",
+        marginBottom: 10, gap: 8
+      }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--tx)", letterSpacing: ".15em", fontWeight: 800 }}>{props.title}</div>
+        {props.subtitle && <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".1em" }}>{props.subtitle}</div>}
+      </div>
+      {props.children}
+    </div>;
+  }
+
+  // ── Render ──
+  var gridCols = compact ? "repeat(auto-fit,minmax(220px,1fr))" : "repeat(auto-fit,minmax(280px,1fr))";
+
+  return <div style={{ animation: "fu .3s ease" }}>
+    {/* Hero KPI row */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--b1)", border: "1px solid var(--b1)", marginBottom: 12 }}>
+      <KpiCard label="BREAKERS" value={totalBreakers} color="var(--ac)" />
+      <KpiCard label="CREWS" value={totalCrews} color="var(--cr)" />
+      <KpiCard label="EVENTS" value={totalEvents} color="var(--jd)" />
+      <KpiCard label="MATCHES" value={totalMatches} color="var(--gn)" />
+    </div>
+
+    {/* Card grid */}
+    <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 10 }}>
+      {/* Top 5 Breakers */}
+      <Card title="TOP BREAKERS" subtitle="BY DPR" delay={0.05}>
+        {top5Breakers.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
+          : top5Breakers.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u}
+              sub={u.city || u.country}
+              value={u.dpr || 0} valColor="var(--gd)" last={i === top5Breakers.length - 1} />;
+          })}
+      </Card>
+
+      {/* Top 5 Crews */}
+      <Card title="TOP CREWS" subtitle="BY DPR" delay={0.08}>
+        {top5Crews.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
+          : top5Crews.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u} isCrew
+              sub={(u.eventsCount || 0) + " events · " + (u.wins || 0) + " wins"}
+              value={u.dpr || 0} valColor="var(--cr)" last={i === top5Crews.length - 1} />;
+          })}
+      </Card>
+
+      {/* Cypher Kings */}
+      <Card title="CYPHER KINGS" subtitle={"× " + totalKingCrowns + " CROWNS"} delay={0.11}>
+        {kings.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No kings crowned yet.</div>
+          : kings.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u}
+              sub={u.city || u.country}
+              value={"× " + (u.cypherKings || 0)} valColor="var(--gd)" last={i === kings.length - 1} />;
+          })}
+      </Card>
+
+      {/* On Fire / Streaks */}
+      <Card title="ON FIRE" subtitle="LAST 5 EVENTS" delay={0.14}>
+        {onFire.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No active streaks.</div>
+          : onFire.map(function (u, i) {
+            return <MiniRow key={u.id} rank={i + 1} u={u}
+              sub={u.city || u.country}
+              value={u._w + " W"} valColor="var(--rd)" last={i === onFire.length - 1} />;
+          })}
+      </Card>
+
+      {/* Top Judges */}
+      <Card title="TOP JUDGES" subtitle="BY EVENT COUNT" delay={0.17}>
+        {topJudges.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No judges recorded.</div>
+          : topJudges.map(function (j, i) {
+            return <MiniRow key={j.name} rank={i + 1} u={{ name: j.name }}
+              sub={null} value={j.events + " ev"} valColor="var(--jd)" last={i === topJudges.length - 1} />;
+          })}
+      </Card>
+
+      {/* Hot Region */}
+      <Card title="HOT REGION" subtitle="MOST ACTIVE" delay={0.20}>
+        {!topCountry && !topCity ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No regional data.</div> : <>
+          {topCountry && <div style={{ paddingBottom: 8, borderBottom: topCity ? "1px solid var(--b2)" : "none", marginBottom: topCity ? 8 : 0 }}>
+            <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".15em", marginBottom: 3 }}>COUNTRY</div>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6 }}>
+              <span style={{ fontSize: 16, fontFamily: "Epilogue", fontWeight: 800, color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{topCountry.name}</span>
+              <span style={{ fontSize: 13, fontFamily: "JetBrains Mono", fontWeight: 700, color: "var(--gd)", flexShrink: 0 }}>{topCountry.dpr || 0}</span>
+            </div>
+            <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 2 }}>
+              {(topCountry.players || 0) + " breakers · " + (topCountry.events || 0) + " entries"}
+            </div>
+          </div>}
+          {topCity && <div>
+            <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".15em", marginBottom: 3 }}>CITY</div>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6 }}>
+              <span style={{ fontSize: 16, fontFamily: "Epilogue", fontWeight: 800, color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{topCity.name}</span>
+              <span style={{ fontSize: 13, fontFamily: "JetBrains Mono", fontWeight: 700, color: "var(--gd)", flexShrink: 0 }}>{topCity.dpr || 0}</span>
+            </div>
+            <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 2 }}>
+              {(topCity.players || 0) + " breakers · " + (topCity.events || 0) + " entries"}
+            </div>
+          </div>}
+        </>}
+      </Card>
+
+      {/* Activity timeline (bar chart) */}
+      <Card title="EVENT PULSE" subtitle="LAST 6 MONTHS" delay={0.23}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 90, paddingTop: 4 }}>
+          {months.map(function (mm, i) {
+            var h = monthsMax > 0 ? Math.max(2, (mm.count / monthsMax) * 80) : 2;
+            return <div key={mm.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <div style={{
+                width: "100%", height: h, background: "var(--ac)",
+                opacity: 0.3 + 0.7 * (mm.count / monthsMax),
+                transition: "height .6s ease"
+              }} title={mm.count + " events"} />
+              <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{mm.label}</div>
+            </div>;
+          })}
+        </div>
+        <div style={{
+          marginTop: 8, fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+          textAlign: "center", letterSpacing: ".1em"
+        }}>{(p.events || []).length} total events</div>
+      </Card>
+
+      {/* Format breakdown */}
+      <Card title="FORMAT MIX" subtitle="BY EVENT" delay={0.26}>
+        {fmtTotal === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No events yet.</div>
+          : fmtList.map(function (f, i) {
+            var pct = Math.round((f.count / fmtTotal) * 100);
+            var palette = ["var(--ac)", "var(--cr)", "var(--jd)", "var(--gn)", "var(--gd)", "var(--dm)"];
+            var col = palette[i % palette.length];
+            return <div key={f.name} style={{ marginBottom: i === fmtList.length - 1 ? 0 : 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                <span style={{ fontSize: 11, fontFamily: "Epilogue", fontWeight: 700, color: "var(--tx)" }}>{f.name}</span>
+                <span style={{ fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700, color: col }}>{f.count} · {pct}%</span>
+              </div>
+              <div style={{ height: 6, background: "var(--c2)", borderRadius: 0, overflow: "hidden" }}>
+                <div style={{ width: pct + "%", height: "100%", background: col, transition: "width .6s ease" }} />
+              </div>
+            </div>;
+          })}
+      </Card>
+    </div>
+
+    {/* Footer link for embed variant */}
+    {compact && <div style={{ marginTop: 14, textAlign: "center" }}>
+      <a href={origin + "/"} target="_top" rel="noopener noreferrer" style={{
+        display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 18px", borderRadius: 0,
+        background: "var(--tx)", color: "var(--bg)",
+        textDecoration: "none", fontSize: 11, fontFamily: "JetBrains Mono",
+        fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase"
+      }}>
+        <span>View Full Leaderboard</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M7 17L17 7M17 7H8M17 7v9" />
+        </svg>
+      </a>
+    </div>}
+  </div>;
+}
+
 function LeaderboardEmbed(p) {
   var cfg = p.config;
   // Local state mirrors the embed's interactive chips. Initial values come from URL params (cfg).
@@ -2906,6 +3194,33 @@ function LeaderboardEmbed(p) {
       fontSize: 10, fontFamily: "JetBrains Mono", fontWeight: 700, cursor: "pointer",
       whiteSpace: "nowrap"
     }}>{label}</button>;
+  }
+
+  // Dashboard view: dense Salesforce-style grid of stat cards (default)
+  if (cfg.view === "dashboard") {
+    return <div style={Object.assign({}, CV, themeVars, {
+      minHeight: "100vh", background: "var(--bg)", color: "var(--tx)",
+      fontFamily: "Epilogue", padding: "14px 14px 24px",
+      boxSizing: "border-box"
+    })}>
+      <AppHead />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", marginBottom: 2 }}>
+            ◫ DASHBOARD
+          </div>
+          <h2 style={{ fontFamily: "Epilogue", fontSize: 18, color: "var(--tx)", margin: 0 }}>Cypher Net</h2>
+        </div>
+        <a href={(typeof window !== "undefined" ? window.location.origin : "")} target="_top" rel="noopener noreferrer"
+          title="Open Cypher Net" style={{
+            fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)",
+            textDecoration: "none", letterSpacing: ".15em", flexShrink: 0
+          }}>CYPHER NET ↗</a>
+      </div>
+      <LeaderboardDashboard compact
+        pR={stats.pR} cR={stats.cR} cityR={stats.cityR} stateR={stats.stateR}
+        countryR={stats.countryR} events={filteredEvents} />
+    </div>;
   }
 
   return <div style={Object.assign({}, CV, themeVars, {
@@ -3089,10 +3404,12 @@ function EmbedHelp() {
         win: sp.get("window") || "all",
         fmt: sp.get("format") || "all",
         q: sp.get("q") || "",
-        interactive: sp.get("interactive") !== "0"
+        interactive: sp.get("interactive") !== "0",
+        view: sp.get("view") || "dashboard"
       };
     } catch (e) { return {}; }
   })();
+  var _vw = useState(initial.view || "dashboard"), viewSel = _vw[0], setViewSel = _vw[1];
   var _m = useState(initial.mode || "players"), mode = _m[0], setMode = _m[1];
   var _c = useState(initial.country || "All"), country = _c[0], setCountry = _c[1];
   var _s = useState(initial.sort || "dpr"), sort = _s[0], setSort = _s[1];
@@ -3103,13 +3420,14 @@ function EmbedHelp() {
   var _fm = useState(initial.fmt || "all"), fmtSel = _fm[0], setFmtSel = _fm[1];
   var _qq = useState(initial.q || ""), q = _qq[0], setQ = _qq[1];
   var _it = useState(initial.interactive !== false), interactive = _it[0], setInteractive = _it[1];
-  var _w = useState("380"), w = _w[0], setW = _w[1];
-  var _h = useState("700"), h = _h[0], setH = _h[1];
+  var _w = useState(viewSel === "dashboard" ? "640" : "380"), w = _w[0], setW = _w[1];
+  var _h = useState(viewSel === "dashboard" ? "900" : "700"), h = _h[0], setH = _h[1];
   var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
 
   var origin = typeof window !== "undefined" ? window.location.origin : "https://cyphernet.vercel.app";
   var sp = new URLSearchParams();
   sp.set("embed", "leaderboard");
+  if (viewSel !== "dashboard") sp.set("view", viewSel);
   sp.set("mode", mode);
   if (country !== "All") sp.set("country", country);
   sp.set("sort", sort);
@@ -3146,7 +3464,31 @@ function EmbedHelp() {
         </p>
 
         <Crd>
-          <Lbl>Mode</Lbl>
+          <Lbl>View</Lbl>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <button onClick={function () { setViewSel("dashboard"); }} style={{
+              flex: 1, padding: "10px 12px",
+              background: viewSel === "dashboard" ? "var(--tx)" : "transparent",
+              color: viewSel === "dashboard" ? "var(--bg)" : "var(--dm)",
+              border: "1px solid " + (viewSel === "dashboard" ? "var(--tx)" : "var(--b1)"),
+              fontSize: 12, fontFamily: "JetBrains Mono", fontWeight: 700,
+              letterSpacing: ".08em", cursor: "pointer"
+            }}>◫ DASHBOARD</button>
+            <button onClick={function () { setViewSel("list"); }} style={{
+              flex: 1, padding: "10px 12px",
+              background: viewSel === "list" ? "var(--tx)" : "transparent",
+              color: viewSel === "list" ? "var(--bg)" : "var(--dm)",
+              border: "1px solid " + (viewSel === "list" ? "var(--tx)" : "var(--b1)"),
+              fontSize: 12, fontFamily: "JetBrains Mono", fontWeight: 700,
+              letterSpacing: ".08em", cursor: "pointer"
+            }}>≡ LIST</button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 12, lineHeight: 1.4 }}>
+            {viewSel === "dashboard" ? "Salesforce-style grid: KPIs, top breakers, crews, kings, streaks, judges, region, event pulse, format mix — all visible at once."
+              : "Single leaderboard with collapsible tier cards. Use the mode/sort/filter controls below."}
+          </div>
+
+          {viewSel === "list" && <><Lbl>Mode</Lbl>
           <select value={mode} onChange={function (e) { setMode(e.target.value); }} style={{
             width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
             color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue", marginBottom: 10
@@ -3210,6 +3552,7 @@ function EmbedHelp() {
               <option value="winPct">Win %</option>
               <option value="standings">Avg Score</option>
             </select>
+          </>}
           </>}
 
           <div style={{ display: "flex", gap: 8 }}>
@@ -3280,6 +3623,7 @@ function EmbedHelp() {
 // RANKINGS (improved: podium, placement chips, label filter)
 // ═══════════════════════════════════════════════════════════════
 function RankingsView(p) {
+  var _v = useState("dashboard"), view = _v[0], setView = _v[1];
   var _a = useState("players"), mode = _a[0], setMode = _a[1];
   var _b = useState("dpr"), sort = _b[0], setSort = _b[1];
   var _c = useState(null), labelFilter = _c[0], setLabelFilter = _c[1];
@@ -3435,8 +3779,31 @@ function RankingsView(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onBack} />
-    <h2 style={{ fontFamily: "Epilogue", fontSize: 26, color: "var(--tx)", marginBottom: 12 }}>Rankings</h2>
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
+      <h2 style={{ fontFamily: "Epilogue", fontSize: 26, color: "var(--tx)" }}>Rankings</h2>
+      <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--c2)", border: "1px solid var(--b1)" }}>
+        <button onClick={function () { setView("dashboard"); }} style={{
+          padding: "6px 12px",
+          background: view === "dashboard" ? "var(--tx)" : "transparent",
+          color: view === "dashboard" ? "var(--bg)" : "var(--dm)",
+          border: "none", fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700,
+          letterSpacing: ".1em", cursor: "pointer"
+        }}>◫ DASHBOARD</button>
+        <button onClick={function () { setView("list"); }} style={{
+          padding: "6px 12px",
+          background: view === "list" ? "var(--tx)" : "transparent",
+          color: view === "list" ? "var(--bg)" : "var(--dm)",
+          border: "none", fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700,
+          letterSpacing: ".1em", cursor: "pointer"
+        }}>≡ DEEP DIVE</button>
+      </div>
+    </div>
 
+    {view === "dashboard" && <LeaderboardDashboard
+      pR={fStats.pR} cR={fStats.cR} cityR={fStats.cityR} stateR={fStats.stateR}
+      countryR={fStats.countryR} events={p.events} />}
+
+    {view === "list" && <>
     <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
       {MODE_TABS.map(function (t) {
         var active = mode === t.id;
@@ -3659,6 +4026,7 @@ function RankingsView(p) {
         📺 EMBED THIS LEADERBOARD ON YOUR SITE
       </button>
     </div>}
+    </>}
   </div>);
 }
 
