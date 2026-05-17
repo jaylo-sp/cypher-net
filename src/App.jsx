@@ -1641,43 +1641,106 @@ function Podium(p) {
   if (top3.length === 0) return null;
   var positions = [top3[1], top3[0], top3[2]].filter(Boolean);
   var order = [2, 1, 3];
-  var heights = [110, 140, 90];
-  var colors = ["#d1d5db", "var(--gd)", "#cd7f32"];
+  var heights = [130, 170, 105];
+  var avSizes = [54, 72, 46];
+  var medals = ["🥈", "🥇", "🥉"];
+  var colors = ["#cbd5e1", "var(--gd)", "#cd7f32"];
+  var glows = ["#cbd5e155", "#ffd70066", "#cd7f3255"];
+  function valFor(u) {
+    if (p.sort === "events") return ((u.events != null ? u.events : u.eventsAttended) || 0) + "";
+    if (p.sort === "wins") return (u.wins || 0) + "";
+    if (p.sort === "winPct") return (u.winPct || 0) + "%";
+    if (p.sort === "standings") return (u.standings || 0).toFixed(1);
+    return ((u.dpr != null ? u.dpr : u.participation) || 0) + "";
+  }
+  var unitLabels = { events: "EVENTS", wins: "WINS", winPct: "WIN %", standings: "AVG", dpr: "DPR", participation: "DPR" };
+  var unit = unitLabels[p.sort] || "DPR";
   return (<div style={{
     display: "flex", justifyContent: "center", alignItems: "flex-end",
-    gap: 8, marginBottom: 20, padding: "0 4px"
+    gap: 14, marginBottom: 24, padding: "20px 4px 8px"
   }}>
     {positions.map(function (u, i) {
-      var pos = order[i], h = heights[i], col = colors[i];
-      return <div key={u.id} style={{
-        flex: 1, maxWidth: 120, display: "flex", flexDirection: "column",
-        alignItems: "center", animation: "fu .4s ease both",
-        animationDelay: (i * 0.08) + "s"
+      var pos = order[i], h = heights[i], av = avSizes[i], col = colors[i], glow = glows[i];
+      var isChamp = pos === 1;
+      return <div key={u.id || (u.name + i)} style={{
+        flex: 1, maxWidth: isChamp ? 170 : 130,
+        display: "flex", flexDirection: "column",
+        alignItems: "center", animation: "fu .5s ease both",
+        animationDelay: (i * 0.1) + "s"
       }}>
-        <Av name={u.breakingName || u.name} sz={pos === 1 ? 52 : 40} isCrew={p.isCrew} />
+        {isChamp && <div style={{
+          fontSize: 26, marginBottom: -2,
+          filter: "drop-shadow(0 0 10px " + glow + ")",
+          animation: "gw 2.5s infinite"
+        }}>👑</div>}
         <div style={{
-          fontSize: pos === 1 ? 14 : 12, fontWeight: 800,
+          padding: 3, borderRadius: "50%",
+          background: "linear-gradient(135deg, " + col + ", " + col + "44)",
+          boxShadow: isChamp
+            ? "0 0 28px " + glow + ", inset 0 0 8px rgba(0,0,0,.3)"
+            : "0 0 12px " + glow
+        }}>
+          <Av name={u.breakingName || u.name} sz={av} isCrew={p.isCrew} />
+        </div>
+        <div style={{
+          fontSize: isChamp ? 17 : 14, fontWeight: 800,
           fontFamily: "Oswald", color: "var(--tx)",
-          marginTop: 6, textAlign: "center",
+          marginTop: 8, textAlign: "center",
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%"
         }}>{u.breakingName || u.name}</div>
+        {!p.isCrew && (u.city || u.country) && <div style={{
+          fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+          marginTop: 1, textAlign: "center"
+        }}>{u.city || u.country}</div>}
         <div style={{
-          fontSize: pos === 1 ? 20 : 16, fontWeight: 900,
-          fontFamily: "JetBrains Mono", color: col, marginTop: 2
-        }}>{p.sort === "participation" ? u.participation : u.standings.toFixed(1)}</div>
+          fontSize: isChamp ? 28 : 21, fontWeight: 900,
+          fontFamily: "JetBrains Mono", color: col, marginTop: 6,
+          textShadow: "0 0 10px " + glow, lineHeight: 1
+        }}>{valFor(u)}</div>
         <div style={{
-          height: h, width: "100%", marginTop: 8,
-          background: "linear-gradient(180deg, " + col + "33 0%, " + col + "0d 100%)",
-          borderTop: "3px solid " + col,
-          borderRadius: "8px 8px 2px 2px",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontFamily: "Oswald", fontSize: pos === 1 ? 36 : 28,
-          fontWeight: 900, color: col,
-          animation: pos === 1 ? "gw 2.5s infinite" : "none"
-        }}>{pos}</div>
+          fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono",
+          letterSpacing: ".15em", marginTop: 1
+        }}>{unit}</div>
+        <div style={{
+          height: h, width: "100%", marginTop: 10,
+          background: "linear-gradient(180deg, " + col + "55 0%, " + col + "11 100%)",
+          borderTop: "4px solid " + col,
+          borderLeft: "1px solid " + col + "33",
+          borderRight: "1px solid " + col + "33",
+          borderRadius: "10px 10px 2px 2px",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          fontFamily: "Oswald", color: col,
+          boxShadow: "inset 0 -8px 0 rgba(0,0,0,.2)"
+        }}>
+          <div style={{ fontSize: isChamp ? 48 : 36, fontWeight: 900, lineHeight: 1 }}>{pos}</div>
+          <div style={{ fontSize: isChamp ? 30 : 22, marginTop: 4 }}>{medals[i]}</div>
+        </div>
       </div>;
     })}
   </div>);
+}
+
+// Tiny inline SVG sparkline for a series of values. Width adapts to bars.
+function Sparkline(p) {
+  var values = p.values || [];
+  if (!values.length) return null;
+  var w = p.width || 80;
+  var h = p.height || 22;
+  var max = Math.max.apply(null, values.concat([1]));
+  var barW = (w - (values.length - 1) * 2) / values.length;
+  return <svg width={w} height={h} style={{ display: "block" }}>
+    {values.map(function (v, i) {
+      var bh = max > 0 ? Math.max(2, (v / max) * h) : 2;
+      return <rect key={i}
+        x={i * (barW + 2)}
+        y={h - bh}
+        width={barW}
+        height={bh}
+        rx={1}
+        fill={p.color || "var(--ac)"}
+        opacity={0.4 + 0.6 * (v / max)} />;
+    })}
+  </svg>;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2477,63 +2540,113 @@ function RankingsView(p) {
   var _a = useState("players"), mode = _a[0], setMode = _a[1];
   var _b = useState("dpr"), sort = _b[0], setSort = _b[1];
   var _c = useState(null), labelFilter = _c[0], setLabelFilter = _c[1];
+  var _cf = useState("All"), countryFilter = _cf[0], setCountryFilter = _cf[1];
 
   var sortFns = {
     dpr: function (a, b2) { return (b2.dpr || 0) - (a.dpr || 0); },
     wins: function (a, b2) { return (b2.wins || 0) - (a.wins || 0); },
     winPct: function (a, b2) { return (b2.winPct || 0) - (a.winPct || 0); },
-    standings: function (a, b2) { return (b2.standings || 0) - (a.standings || 0); }
+    standings: function (a, b2) { return (b2.standings || 0) - (a.standings || 0); },
+    events: function (a, b2) { return (b2.events || b2.eventsAttended || 0) - (a.events || a.eventsAttended || 0); }
   };
-  var sortFn = sortFns[sort] || sortFns.dpr;
+
+  // Build judges leaderboard from events' jn maps
+  var judgesR = useMemo(function () {
+    var map = {};
+    (p.events || []).forEach(function (ev) {
+      if (!ev.jn) return;
+      for (var i = 0; i < (ev.nj || 0); i++) {
+        var name = (ev.jn[i] || "").trim();
+        if (!name) continue;
+        if (!map[name]) map[name] = { id: name, name: name, events: 0 };
+        map[name].events += 1;
+      }
+    });
+    return Object.keys(map).map(function (k) { return map[k]; });
+  }, [p.events]);
 
   var base;
   if (mode === "players") {
     base = (p.pR || []).filter(function (x) {
       if (!(x.dpr > 0 || x.eventsAttended > 0)) return false;
       if (labelFilter && !(x.labels || []).includes(labelFilter)) return false;
+      if (countryFilter !== "All" && x.country !== countryFilter) return false;
       return true;
     });
   } else if (mode === "crews") {
     base = (p.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
   } else if (mode === "cities") {
-    base = (p.cityR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
+    base = (p.cityR || []).filter(function (x) {
+      if (!(x.dpr > 0 || x.events > 0)) return false;
+      if (countryFilter !== "All" && !(x.name || "").endsWith(", " + countryFilter)) return false;
+      return true;
+    });
   } else if (mode === "states") {
-    base = (p.stateR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
-  } else {
+    base = (p.stateR || []).filter(function (x) {
+      if (!(x.dpr > 0 || x.events > 0)) return false;
+      if (countryFilter !== "All" && !(x.name || "").endsWith(", " + countryFilter)) return false;
+      return true;
+    });
+  } else if (mode === "countries") {
     base = (p.countryR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
+  } else if (mode === "judges") {
+    base = judgesR.filter(function (x) { return x.events > 0; });
   }
-  var list = base.slice().sort(sortFn);
+
+  var effSort = mode === "judges" ? "events" : sort;
+  var effSortFn = sortFns[effSort] || sortFns.dpr;
+  var list = (base || []).slice().sort(effSortFn);
+
+  // Country options derived from profiles
+  var countries = ["All"];
+  (p.profiles || []).forEach(function (pr) {
+    if (pr.country && countries.indexOf(pr.country) === -1) countries.push(pr.country);
+  });
+  countries.sort(function (a, b) { return a === "All" ? -1 : b === "All" ? 1 : a.localeCompare(b); });
 
   var MODE_TABS = [
     { id: "players", l: "Breakers", col: "var(--ac)", bg: "var(--ac2)" },
     { id: "crews", l: "Crews", col: "var(--cr)", bg: "var(--cr2)" },
+    { id: "judges", l: "Judges", col: "var(--jd)", bg: "var(--jd2)" },
     { id: "cities", l: "Cities", col: "var(--jd)", bg: "var(--jd2)" },
     { id: "states", l: "States", col: "var(--gn)", bg: "var(--gn2)" },
     { id: "countries", l: "Countries", col: "var(--gd)", bg: "var(--gd2)" }
   ];
-  var SORT_TABS = [
+  var SORT_TABS = mode === "judges" ? [
+    { id: "events", l: "Events", col: "var(--gd)", bg: "var(--gd2)" }
+  ] : [
     { id: "dpr", l: "DPR", col: "var(--gd)", bg: "var(--gd2)" },
     { id: "wins", l: "Wins", col: "var(--ac)", bg: "var(--ac2)" },
     { id: "winPct", l: "Win %", col: "var(--gn)", bg: "var(--gn2)" },
     { id: "standings", l: "Avg Score", col: "var(--jd)", bg: "var(--jd2)" }
   ];
 
-  var sortVal = SORT_TABS.find(function (s) { return s.id === sort; }) || SORT_TABS[0];
+  var sortVal = SORT_TABS.find(function (s) { return s.id === effSort; }) || SORT_TABS[0];
 
   function valueOf(u) {
-    if (sort === "dpr") return u.dpr || 0;
-    if (sort === "wins") return u.wins || 0;
-    if (sort === "winPct") return (u.winPct || 0) + "%";
+    if (effSort === "events") return u.events || u.eventsAttended || 0;
+    if (effSort === "dpr") return u.dpr || 0;
+    if (effSort === "wins") return u.wins || 0;
+    if (effSort === "winPct") return (u.winPct || 0) + "%";
     return (u.standings || 0).toFixed(1);
   }
 
   function rowMetaText(u) {
-    if (mode === "players") return null; // uses PlacementChips
+    if (mode === "players") return null;
     if (mode === "crews") return u.eventsCount + " events · " + u.wins + " wins · " + u.winPct + "% win";
-    return u.players + " breakers · " + u.events + " entries · " + u.wins + " wins";
+    if (mode === "judges") return u.events + " events judged";
+    return (u.players || 0) + " breakers · " + (u.events || 0) + " entries · " + (u.wins || 0) + " wins";
   }
 
-  var showPodium = mode !== "players" ? false : list.length >= 3;
+  function sparklineData(u) {
+    if (mode === "players" && u.placements) {
+      return u.placements.slice(-8).map(function (pl) { return pl.pts || 0; });
+    }
+    return null;
+  }
+
+  var showCountryFilter = mode === "players" || mode === "cities" || mode === "states";
+  var showPodium = list.length >= 3;
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onBack} />
@@ -2553,9 +2666,9 @@ function RankingsView(p) {
       })}
     </div>
 
-    <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 4 }}>
+    <div style={{ display: "flex", gap: 6, marginBottom: 14, paddingBottom: 4, alignItems: "center", flexWrap: "wrap" }}>
       {SORT_TABS.map(function (s) {
-        var active = sort === s.id;
+        var active = effSort === s.id;
         return <button key={s.id} onClick={function () { setSort(s.id) }} style={{
           flex: "0 0 auto", padding: "7px 14px", borderRadius: 7,
           border: "1px solid " + (active ? s.col : "var(--b1)"),
@@ -2564,6 +2677,20 @@ function RankingsView(p) {
           fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "JetBrains Mono", whiteSpace: "nowrap"
         }}>{s.l}</button>;
       })}
+      {showCountryFilter && countries.length > 1 && <select
+        value={countryFilter}
+        onChange={function (e) { setCountryFilter(e.target.value); }}
+        style={{
+          padding: "7px 10px", borderRadius: 7,
+          background: countryFilter === "All" ? "transparent" : "var(--c2)",
+          color: countryFilter === "All" ? "var(--dm)" : "var(--tx)",
+          border: "1px solid " + (countryFilter === "All" ? "var(--b1)" : "var(--ac)"),
+          fontSize: 12, fontFamily: "JetBrains Mono", fontWeight: 700, cursor: "pointer"
+        }}>
+        {countries.map(function (c) {
+          return <option key={c} value={c}>{c === "All" ? "🌍 All countries" : c}</option>;
+        })}
+      </select>}
     </div>
 
     {mode === "players" && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14 }}>
@@ -2587,41 +2714,50 @@ function RankingsView(p) {
       })}
     </div>}
 
-    {showPodium && <Podium top3={list.slice(0, 3)} sort={sort === "standings" ? "standings" : "participation"} isCrew={false} />}
+    {showPodium && <Podium top3={list.slice(0, 3)} sort={effSort} isCrew={mode === "crews"} />}
 
     <Crd sx={{ padding: 0, overflow: "hidden" }}>
       {list.slice(showPodium ? 3 : 0).map(function (u, i) {
         var rank = (showPodium ? 3 : 0) + i + 1;
         var displayName = u.breakingName || u.name;
         var meta = rowMetaText(u);
+        var spark = sparklineData(u);
+        var subInfo = mode === "players" ? (u.city || u.country || ((u.crews || [])[0] || {}).name) : null;
         return <div key={u.id || displayName} style={{
-          display: "flex", alignItems: "center", gap: 10, padding: "12px 16px",
+          display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
           borderBottom: "1px solid var(--b2)", animation: "fu .3s ease both",
           animationDelay: (i * 0.02) + "s"
         }}>
           <span style={{
             fontSize: 15, fontWeight: 900, fontFamily: "JetBrains Mono",
-            color: "var(--dm)", minWidth: 30
+            color: rank <= 5 ? sortVal.col : "var(--dm)", minWidth: 32
           }}>{"#" + rank}</span>
-          <Av name={displayName} sz={32} isCrew={mode === "crews"} />
+          <Av name={displayName} sz={34} isCrew={mode === "crews"} />
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <div style={{
               fontSize: 15, fontWeight: 700, fontFamily: "Oswald", color: "var(--tx)",
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
             }}>{displayName}</div>
+            {subInfo && <div style={{
+              fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1
+            }}>{subInfo}</div>}
             <div style={{ marginTop: 3 }}>
               {mode === "players" ? <PlacementChips placements={u.placements} /> :
                 <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{meta}</span>}
             </div>
           </div>
+          {spark && spark.length > 0 && <div style={{ opacity: 0.85, flexShrink: 0 }} title="Recent placement points">
+            <Sparkline values={spark} width={70} height={24} color={sortVal.col} />
+          </div>}
           <div style={{
             fontSize: 18, fontWeight: 800, fontFamily: "JetBrains Mono",
-            color: sortVal.col
+            color: sortVal.col, minWidth: 54, textAlign: "right"
           }}>{valueOf(u)}</div>
         </div>;
       })}
       {list.length === 0 && <div style={{ padding: 36, textAlign: "center", color: "var(--dm)" }}>
-        No data yet
+        {mode === "judges" ? "No judges recorded yet — set judge names on an event." : "No data yet"}
       </div>}
     </Crd>
   </div>);
@@ -3516,13 +3652,35 @@ function AudienceProfileDetail(p) {
         })}
       </Crd>}
 
-      {yt && <Crd>
-        <Lbl>Clip</Lbl>
-        <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 8 }}>
-          <iframe src={"https://www.youtube.com/embed/" + yt} title="clip" allowFullScreen
-            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 }} />
-        </div>
-      </Crd>}
+      {(function () {
+        var clips = [];
+        if (yt) clips.push({ id: "primary", label: "🎬 PRIMARY CLIP", subLabel: null, ytId: yt });
+        (p.events || []).forEach(function (e) {
+          var pl = (e.players || []).find(function (x) { return x.pid === pr.id; });
+          if (pl && pl.clip) {
+            var cid = ytId(pl.clip);
+            if (cid) clips.push({ id: e.id, label: e.name, subLabel: e.dt, ytId: cid });
+          }
+        });
+        if (clips.length === 0) return null;
+        return <Crd>
+          <Lbl>📺 Highlight Reel{clips.length > 1 ? " (" + clips.length + ")" : ""}</Lbl>
+          {clips.map(function (c, i) {
+            return <div key={c.id} style={{ marginBottom: i < clips.length - 1 ? 14 : 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "baseline" }}>
+                <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.label}
+                </div>
+                {c.subLabel && <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", flexShrink: 0, marginLeft: 8 }}>{fmtD(c.subLabel)}</div>}
+              </div>
+              <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: 8 }}>
+                <iframe src={"https://www.youtube.com/embed/" + c.ytId} title={c.label} allowFullScreen loading="lazy"
+                  style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 }} />
+              </div>
+            </div>;
+          })}
+        </Crd>;
+      })()}
 
       {claim && claim.status === "approved" && <MyScoresPanel profile={pr} events={p.events} />}
 
@@ -6131,6 +6289,22 @@ function EventDetailView(p) {
           </div>
           {pl.pid && <Tag c="var(--jd)" bg="var(--jd2)">DB</Tag>}
           <button onClick={function () {
+            var current = pl.clip || "";
+            var next = window.prompt("YouTube clip URL for " + pl.name + " in this event:\n(Leave blank to remove)", current);
+            if (next === null) return;
+            upd(ev.id, function (d) {
+              var idx = d.players.findIndex(function (x) { return x.id === pl.id; });
+              if (idx >= 0) {
+                d.players[idx] = Object.assign({}, d.players[idx], { clip: next.trim() || undefined });
+              }
+              return d;
+            });
+          }} title={pl.clip ? "Edit clip URL\n" + pl.clip : "Add clip URL"} style={{
+            background: "none", border: "none",
+            color: pl.clip ? "var(--ac)" : "var(--b1)",
+            cursor: "pointer", fontSize: 16
+          }}>📺</button>
+          <button onClick={function () {
             upd(ev.id, function (d) {
               d.players = d.players.filter(function (x) { return x.id !== pl.id; });
               delete d.scores[pl.id];
@@ -6857,6 +7031,7 @@ function Admin(p) {
     <Crumbs items={[{ label: "Home", onClick: goHome }, { label: "Rankings" }]} />
     <RankingsView pR={stats.pR} cR={stats.cR}
       cityR={stats.cityR} stateR={stats.stateR} countryR={stats.countryR}
+      events={p.events} profiles={p.profiles}
       onBack={function () { setView("home") }} />
   </div>;
 
