@@ -28,6 +28,30 @@ var BTYPES = [
 function isDraftFormat(t) { return t === "draft3" || t === "draft4" || t === "draft5" }
 function isCaptureFormat(t) { return t === "capture3" || t === "capture4" || t === "capture5" }
 function isLmsFormat(t) { return t === "lms3" || t === "lms4" }
+
+// ── Rankings filter helpers ──
+function eventInWindow(ev, win) {
+  if (!win || win === "all") return true;
+  if (!ev || !ev.dt) return false;
+  var d = new Date(ev.dt);
+  if (isNaN(d.getTime())) return false;
+  var now = new Date();
+  if (win === "30d") return (now - d) / 86400000 <= 30;
+  if (win === "90d") return (now - d) / 86400000 <= 90;
+  if (win === "6mo") return (now - d) / 86400000 <= 180;
+  if (win === "year") return d.getFullYear() === now.getFullYear();
+  return true;
+}
+function eventInFormat(ev, fmt) {
+  if (!fmt || fmt === "all") return true;
+  if (!ev || !ev.type) return false;
+  if (fmt === "solo") return ev.type === "solo";
+  if (fmt === "2v2" || fmt === "3v3" || fmt === "4v4") return ev.type === fmt;
+  if (fmt === "crew") return ev.type === "crew";
+  if (fmt === "draft") return isDraftFormat(ev.type);
+  if (fmt === "specialty") return ev.type === "7smoke" || isCaptureFormat(ev.type) || isLmsFormat(ev.type);
+  return true;
+}
 function formatTeamSize(t) {
   if (t === "draft3" || t === "capture3" || t === "lms3") return 3;
   if (t === "draft4" || t === "capture4" || t === "lms4") return 4;
@@ -478,7 +502,11 @@ function readEmbedConfig() {
       sort: sp.get("sort") || "dpr",
       limit: Math.max(1, Math.min(100, parseInt(sp.get("limit") || "10", 10) || 10)),
       theme: sp.get("theme") === "light" ? "light" : "dark",
-      compact: sp.get("compact") === "1"
+      compact: sp.get("compact") === "1",
+      window: sp.get("window") || "all",
+      format: sp.get("format") || "all",
+      q: sp.get("q") || "",
+      interactive: sp.get("interactive") !== "0"  // default ON — embed has filter chips
     };
   } catch (e) { return null; }
 }
@@ -2568,13 +2596,27 @@ function modeTitle(mode, country) {
 
 function LeaderboardEmbed(p) {
   var cfg = p.config;
+  // Local state mirrors the embed's interactive chips. Initial values come from URL params (cfg).
+  var _md = useState((cfg.mode === "breakers") ? "players" : cfg.mode), mode = _md[0], setMode = _md[1];
+  var _wi = useState(cfg.window || "all"), winSel = _wi[0], setWinSel = _wi[1];
+  var _fm = useState(cfg.format || "all"), fmtSel = _fm[0], setFmtSel = _fm[1];
+  var _qs = useState(cfg.q || ""), qSel = _qs[0], setQSel = _qs[1];
+
+  // Filter event set by window + format
+  var filteredEvents = useMemo(function () {
+    if ((winSel === "all" || !winSel) && (fmtSel === "all" || !fmtSel)) return p.events || [];
+    return (p.events || []).filter(function (e) {
+      return eventInWindow(e, winSel) && eventInFormat(e, fmtSel);
+    });
+  }, [p.events, winSel, fmtSel]);
+
   var stats = useMemo(function () {
-    return calcStats(p.events || [], p.extEvents || [], p.profiles || [], p.crews || []);
-  }, [p.events, p.extEvents, p.profiles, p.crews]);
+    return calcStats(filteredEvents, p.extEvents || [], p.profiles || [], p.crews || []);
+  }, [filteredEvents, p.extEvents, p.profiles, p.crews]);
 
   var judgesR = useMemo(function () {
     var map = {};
-    (p.events || []).forEach(function (ev) {
+    filteredEvents.forEach(function (ev) {
       if (!ev.jn) return;
       for (var i = 0; i < (ev.nj || 0); i++) {
         var name = (ev.jn[i] || "").trim();
@@ -2584,9 +2626,8 @@ function LeaderboardEmbed(p) {
       }
     });
     return Object.keys(map).map(function (k) { return map[k]; });
-  }, [p.events]);
+  }, [filteredEvents]);
 
-  var mode = (cfg.mode === "breakers") ? "players" : cfg.mode;
   var base;
   if (mode === "players") {
     base = (stats.pR || []).filter(function (x) {
@@ -2596,6 +2637,8 @@ function LeaderboardEmbed(p) {
     });
   } else if (mode === "crews") {
     base = (stats.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
+  } else if (mode === "kings") {
+    base = (stats.pR || []).filter(function (x) { return (x.cypherKings || 0) > 0; });
   } else if (mode === "judges") {
     base = judgesR.filter(function (x) { return x.events > 0; });
   } else if (mode === "cities") {
@@ -2616,9 +2659,19 @@ function LeaderboardEmbed(p) {
     base = [];
   }
 
-  var sort = mode === "judges" ? "events" : cfg.sort;
+  // Search
+  if (qSel && qSel.trim()) {
+    var qlc = qSel.toLowerCase().trim();
+    base = base.filter(function (u) {
+      var n = (u.breakingName || u.name || "").toLowerCase();
+      return n.includes(qlc);
+    });
+  }
+
+  var sort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : cfg.sort);
   var sortFns = {
     events: function (a, b2) { return (b2.events || b2.eventsAttended || 0) - (a.events || a.eventsAttended || 0); },
+    cypherKings: function (a, b2) { return (b2.cypherKings || 0) - (a.cypherKings || 0); },
     dpr: function (a, b2) { return (b2.dpr || 0) - (a.dpr || 0); },
     wins: function (a, b2) { return (b2.wins || 0) - (a.wins || 0); },
     winPct: function (a, b2) { return (b2.winPct || 0) - (a.winPct || 0); },
@@ -2628,17 +2681,29 @@ function LeaderboardEmbed(p) {
   var list = (base || []).slice().sort(sortFn).slice(0, cfg.limit);
 
   var sortColors = {
-    events: "var(--gd)", dpr: "var(--gd)", wins: "var(--ac)",
+    events: "var(--gd)", cypherKings: "var(--gd)", dpr: "var(--gd)", wins: "var(--ac)",
     winPct: "var(--gn)", standings: "var(--jd)"
   };
   var sortCol = sortColors[sort] || "var(--gd)";
 
   function valueOf(u) {
     if (sort === "events") return u.events || u.eventsAttended || 0;
+    if (sort === "cypherKings") return "👑 " + (u.cypherKings || 0);
     if (sort === "dpr") return u.dpr || 0;
     if (sort === "wins") return u.wins || 0;
     if (sort === "winPct") return (u.winPct || 0) + "%";
     return (u.standings || 0).toFixed(1);
+  }
+
+  function streakBadge(u) {
+    if (mode !== "players" && mode !== "kings") return null;
+    var pl = u.placements || [];
+    if (pl.length < 3) return null;
+    var lastFive = pl.slice(-5);
+    var wins = lastFive.filter(function (x) { return x.pl === 1; }).length;
+    if (wins >= 3) return "🔥";
+    if (wins >= 2) return "📈";
+    return null;
   }
 
   var themeVars = cfg.theme === "light" ? {
@@ -2649,13 +2714,28 @@ function LeaderboardEmbed(p) {
   var showPodium = !cfg.compact && list.length >= 3;
   var isCrew = mode === "crews";
 
+  // Build the deep-link URL to the full Cypher Net leaderboard (preserves current state)
+  var origin = typeof window !== "undefined" ? window.location.origin : "";
+  var deepLink = origin + "/";  // RoleGate → Audience clicks through to Rankings
+
+  function chip(label, active, onClick, color) {
+    return <button key={label} onClick={onClick} style={{
+      padding: "4px 9px", borderRadius: 6,
+      border: "1px solid " + (active ? (color || "var(--ac)") : "var(--b1)"),
+      background: active ? "var(--c2)" : "transparent",
+      color: active ? "var(--tx)" : "var(--dm)",
+      fontSize: 10, fontFamily: "JetBrains Mono", fontWeight: 700, cursor: "pointer",
+      whiteSpace: "nowrap"
+    }}>{label}</button>;
+  }
+
   return <div style={Object.assign({}, CV, themeVars, {
     minHeight: "100vh", background: "var(--bg)", color: "var(--tx)",
     fontFamily: "Epilogue", padding: "14px 14px 24px",
     boxSizing: "border-box"
   })}>
     <AppHead />
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 10 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", marginBottom: 2 }}>
           🏆 LEADERBOARD
@@ -2664,29 +2744,74 @@ function LeaderboardEmbed(p) {
           {modeTitle(mode, cfg.country)}
         </h2>
       </div>
-      <a href={(typeof window !== "undefined" ? window.location.origin : "")} target="_blank" rel="noopener noreferrer"
-        style={{
+      <a href={deepLink} target="_top" rel="noopener noreferrer"
+        title="Open Cypher Net" style={{
           fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)",
           textDecoration: "none", letterSpacing: ".15em", flexShrink: 0
         }}>CYPHER NET ↗</a>
     </div>
 
+    {/* Interactive filter chips (hide via ?interactive=0) */}
+    {cfg.interactive && <>
+      <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
+        {[
+          { id: "players", l: "Breakers" },
+          { id: "crews", l: "Crews" },
+          { id: "kings", l: "👑 Kings" },
+          { id: "judges", l: "Judges" }
+        ].map(function (m) { return chip(m.l, mode === m.id, function () { setMode(m.id); }); })}
+      </div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
+        {[
+          { id: "all", l: "All-time" },
+          { id: "year", l: "This year" },
+          { id: "6mo", l: "6mo" },
+          { id: "30d", l: "30d" }
+        ].map(function (w) { return chip("⏱ " + w.l, winSel === w.id, function () { setWinSel(w.id); }); })}
+      </div>
+      {(mode === "players" || mode === "crews" || mode === "kings") && <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+        {[
+          { id: "all", l: "All formats" },
+          { id: "solo", l: "Solo" },
+          { id: "2v2", l: "2v2" },
+          { id: "3v3", l: "3v3" },
+          { id: "4v4", l: "4v4" },
+          { id: "crew", l: "Crew" },
+          { id: "draft", l: "Draft" }
+        ].map(function (f) { return chip(f.l, fmtSel === f.id, function () { setFmtSel(f.id); }, "var(--cr)"); })}
+      </div>}
+      <div style={{ position: "relative", marginBottom: 12 }}>
+        <input value={qSel} onChange={function (e) { setQSel(e.target.value); }}
+          placeholder="🔍 Search…"
+          style={{
+            width: "100%", padding: "8px 32px 8px 12px", fontSize: 12,
+            background: "var(--inp)", border: "1px solid var(--b1)", borderRadius: 6,
+            color: "var(--tx)", outline: "none", fontFamily: "Epilogue", boxSizing: "border-box"
+          }} />
+        {qSel && <button onClick={function () { setQSel(""); }} style={{
+          position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+          background: "none", border: "none", color: "var(--dm)", cursor: "pointer", fontSize: 14
+        }}>✕</button>}
+      </div>
+    </>}
+
     {showPodium && <Podium top3={list.slice(0, 3)} sort={sort} isCrew={isCrew} />}
 
     {list.length === 0 ? <Crd>
       <div style={{ padding: 20, textAlign: "center", color: "var(--dm)", fontSize: 12 }}>
-        No data yet for this view.
+        No data for this view.
       </div>
     </Crd> : <Crd sx={{ padding: 0, overflow: "hidden" }}>
       {list.slice(showPodium ? 3 : 0).map(function (u, i) {
         var rank = (showPodium ? 3 : 0) + i + 1;
         var displayName = u.breakingName || u.name;
-        var subInfo = mode === "players" ? (u.city || u.country) : null;
+        var subInfo = (mode === "players" || mode === "kings") ? (u.city || u.country) : null;
         var meta = mode === "crews" ? (u.eventsCount + " events · " + u.wins + " wins")
           : mode === "judges" ? (u.events + " events judged")
           : (mode === "cities" || mode === "states") ? ((u.players || 0) + " breakers · " + (u.wins || 0) + " wins")
           : null;
-        var spark = (mode === "players" && u.placements) ? u.placements.slice(-8).map(function (pl) { return pl.pts || 0; }) : null;
+        var spark = ((mode === "players" || mode === "kings") && u.placements) ? u.placements.slice(-8).map(function (pl) { return pl.pts || 0; }) : null;
+        var streak = streakBadge(u);
         return <div key={u.id || displayName} style={{
           display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
           borderBottom: "1px solid var(--b2)"
@@ -2699,8 +2824,12 @@ function LeaderboardEmbed(p) {
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <div style={{
               fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-            }}>{displayName}</div>
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              display: "flex", alignItems: "center", gap: 4
+            }}>
+              <span>{displayName}</span>
+              {streak && <span style={{ fontSize: 11 }}>{streak}</span>}
+            </div>
             {subInfo && <div style={{
               fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
@@ -2720,6 +2849,16 @@ function LeaderboardEmbed(p) {
         </div>;
       })}
     </Crd>}
+
+    {/* Footer: click-through to full Cypher Net */}
+    <div style={{ marginTop: 14, textAlign: "center" }}>
+      <a href={deepLink} target="_top" rel="noopener noreferrer" style={{
+        display: "inline-block", padding: "8px 14px", borderRadius: 6,
+        background: "var(--tx)", color: "var(--bg)",
+        textDecoration: "none", fontSize: 11, fontFamily: "JetBrains Mono",
+        fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase"
+      }}>View on Cypher Net ↗</a>
+    </div>
   </div>;
 }
 
@@ -2735,7 +2874,11 @@ function EmbedHelp() {
         sort: sp.get("sort") || "dpr",
         limit: sp.get("limit") || "10",
         theme: sp.get("theme") === "light" ? "light" : "dark",
-        compact: sp.get("compact") === "1"
+        compact: sp.get("compact") === "1",
+        win: sp.get("window") || "all",
+        fmt: sp.get("format") || "all",
+        q: sp.get("q") || "",
+        interactive: sp.get("interactive") !== "0"
       };
     } catch (e) { return {}; }
   })();
@@ -2745,6 +2888,10 @@ function EmbedHelp() {
   var _l = useState(initial.limit || "10"), limit = _l[0], setLimit = _l[1];
   var _t = useState(initial.theme || "dark"), theme = _t[0], setTheme = _t[1];
   var _cp = useState(!!initial.compact), compact = _cp[0], setCompact = _cp[1];
+  var _wn = useState(initial.win || "all"), winSel = _wn[0], setWinSel = _wn[1];
+  var _fm = useState(initial.fmt || "all"), fmtSel = _fm[0], setFmtSel = _fm[1];
+  var _qq = useState(initial.q || ""), q = _qq[0], setQ = _qq[1];
+  var _it = useState(initial.interactive !== false), interactive = _it[0], setInteractive = _it[1];
   var _w = useState("380"), w = _w[0], setW = _w[1];
   var _h = useState("700"), h = _h[0], setH = _h[1];
   var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
@@ -2758,6 +2905,10 @@ function EmbedHelp() {
   sp.set("limit", limit);
   sp.set("theme", theme);
   if (compact) sp.set("compact", "1");
+  if (winSel && winSel !== "all") sp.set("window", winSel);
+  if (fmtSel && fmtSel !== "all") sp.set("format", fmtSel);
+  if (q && q.trim()) sp.set("q", q.trim());
+  if (!interactive) sp.set("interactive", "0");
   var src = origin + "/?" + sp.toString();
   var iframe = '<iframe src="' + src + '" width="' + w + '" height="' + h + '" frameborder="0" style="border:none;border-radius:12px;overflow:hidden;background:transparent"></iframe>';
 
@@ -2791,11 +2942,46 @@ function EmbedHelp() {
           }}>
             <option value="players">Top Breakers</option>
             <option value="crews">Top Crews</option>
+            <option value="kings">👑 Cypher Kings</option>
             <option value="judges">Top Judges</option>
             <option value="cities">Top Cities</option>
             <option value="states">Top States</option>
             <option value="countries">Top Countries</option>
           </select>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <Lbl>Time window</Lbl>
+              <select value={winSel} onChange={function (e) { setWinSel(e.target.value); }} style={{
+                width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+                color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+              }}>
+                <option value="all">All-time</option>
+                <option value="year">This year</option>
+                <option value="6mo">Last 6 months</option>
+                <option value="30d">Last 30 days</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <Lbl>Format</Lbl>
+              <select value={fmtSel} onChange={function (e) { setFmtSel(e.target.value); }} style={{
+                width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+                color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+              }}>
+                <option value="all">All formats</option>
+                <option value="solo">Solo</option>
+                <option value="2v2">2v2</option>
+                <option value="3v3">3v3</option>
+                <option value="4v4">4v4</option>
+                <option value="crew">Crew</option>
+                <option value="draft">Draft</option>
+                <option value="specialty">Specialty (7-Smoke / Capture / LMS)</option>
+              </select>
+            </div>
+          </div>
+
+          <Lbl>Search prefix (optional)</Lbl>
+          <Inp value={q} onChange={setQ} placeholder="e.g. Yon — leaves filter applied" />
 
           {(mode === "players" || mode === "cities" || mode === "states") && <>
             <Lbl>Country filter (optional)</Lbl>
@@ -2847,6 +3033,10 @@ function EmbedHelp() {
             <input type="checkbox" checked={compact} onChange={function (e) { setCompact(e.target.checked); }} />
             Compact (no podium — just a list)
           </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13, color: "var(--dm)", cursor: "pointer" }}>
+            <input type="checkbox" checked={interactive} onChange={function (e) { setInteractive(e.target.checked); }} />
+            Interactive filters inside the widget (viewers can switch mode / window / search)
+          </label>
         </Crd>
 
         <Crd>
@@ -2883,6 +3073,20 @@ function RankingsView(p) {
   var _b = useState("dpr"), sort = _b[0], setSort = _b[1];
   var _c = useState(null), labelFilter = _c[0], setLabelFilter = _c[1];
   var _cf = useState("All"), countryFilter = _cf[0], setCountryFilter = _cf[1];
+  var _w = useState("all"), winFilter = _w[0], setWinFilter = _w[1];
+  var _fm = useState("all"), fmtFilter = _fm[0], setFmtFilter = _fm[1];
+  var _q = useState(""), q = _q[0], setQ = _q[1];
+
+  // Recompute stats when window or format filters narrow the event set
+  var fStats = useMemo(function () {
+    if ((winFilter === "all" || !winFilter) && (fmtFilter === "all" || !fmtFilter)) {
+      return { pR: p.pR, cR: p.cR, cityR: p.cityR, stateR: p.stateR, countryR: p.countryR };
+    }
+    var fe = (p.events || []).filter(function (e) {
+      return eventInWindow(e, winFilter) && eventInFormat(e, fmtFilter);
+    });
+    return calcStats(fe, p.extEvents || [], p.profiles || [], p.crews || []);
+  }, [p.pR, p.cR, p.cityR, p.stateR, p.countryR, p.events, p.extEvents, p.profiles, p.crews, winFilter, fmtFilter]);
 
   var sortFns = {
     dpr: function (a, b2) { return (b2.dpr || 0) - (a.dpr || 0); },
@@ -2909,34 +3113,46 @@ function RankingsView(p) {
 
   var base;
   if (mode === "players") {
-    base = (p.pR || []).filter(function (x) {
+    base = (fStats.pR || []).filter(function (x) {
       if (!(x.dpr > 0 || x.eventsAttended > 0)) return false;
       if (labelFilter && !(x.labels || []).includes(labelFilter)) return false;
       if (countryFilter !== "All" && x.country !== countryFilter) return false;
       return true;
     });
   } else if (mode === "crews") {
-    base = (p.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
+    base = (fStats.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
   } else if (mode === "cities") {
-    base = (p.cityR || []).filter(function (x) {
+    base = (fStats.cityR || []).filter(function (x) {
       if (!(x.dpr > 0 || x.events > 0)) return false;
       if (countryFilter !== "All" && !(x.name || "").endsWith(", " + countryFilter)) return false;
       return true;
     });
   } else if (mode === "states") {
-    base = (p.stateR || []).filter(function (x) {
+    base = (fStats.stateR || []).filter(function (x) {
       if (!(x.dpr > 0 || x.events > 0)) return false;
       if (countryFilter !== "All" && !(x.name || "").endsWith(", " + countryFilter)) return false;
       return true;
     });
   } else if (mode === "countries") {
-    base = (p.countryR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
+    base = (fStats.countryR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
+  } else if (mode === "kings") {
+    base = (fStats.pR || []).filter(function (x) { return (x.cypherKings || 0) > 0; });
   } else if (mode === "judges") {
     base = judgesR.filter(function (x) { return x.events > 0; });
   }
 
-  var effSort = mode === "judges" ? "events" : sort;
-  var effSortFn = sortFns[effSort] || sortFns.dpr;
+  // Search filter — name match (uses breakingName or name)
+  if (q && q.trim()) {
+    var qlc = q.toLowerCase().trim();
+    base = (base || []).filter(function (u) {
+      var name = (u.breakingName || u.name || "").toLowerCase();
+      return name.includes(qlc);
+    });
+  }
+
+  var effSort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : sort);
+  var kingsSortFn = function (a, b2) { return (b2.cypherKings || 0) - (a.cypherKings || 0); };
+  var effSortFn = effSort === "cypherKings" ? kingsSortFn : (sortFns[effSort] || sortFns.dpr);
   var list = (base || []).slice().sort(effSortFn);
 
   // Country options derived from profiles
@@ -2949,6 +3165,7 @@ function RankingsView(p) {
   var MODE_TABS = [
     { id: "players", l: "Breakers", col: "var(--ac)", bg: "var(--ac2)" },
     { id: "crews", l: "Crews", col: "var(--cr)", bg: "var(--cr2)" },
+    { id: "kings", l: "👑 Kings", col: "var(--gd)", bg: "var(--gd2)" },
     { id: "judges", l: "Judges", col: "var(--jd)", bg: "var(--jd2)" },
     { id: "cities", l: "Cities", col: "var(--jd)", bg: "var(--jd2)" },
     { id: "states", l: "States", col: "var(--gn)", bg: "var(--gn2)" },
@@ -2956,6 +3173,8 @@ function RankingsView(p) {
   ];
   var SORT_TABS = mode === "judges" ? [
     { id: "events", l: "Events", col: "var(--gd)", bg: "var(--gd2)" }
+  ] : mode === "kings" ? [
+    { id: "cypherKings", l: "👑 Crowns", col: "var(--gd)", bg: "var(--gd2)" }
   ] : [
     { id: "dpr", l: "DPR", col: "var(--gd)", bg: "var(--gd2)" },
     { id: "wins", l: "Wins", col: "var(--ac)", bg: "var(--ac2)" },
@@ -2967,10 +3186,23 @@ function RankingsView(p) {
 
   function valueOf(u) {
     if (effSort === "events") return u.events || u.eventsAttended || 0;
+    if (effSort === "cypherKings") return "👑 " + (u.cypherKings || 0);
     if (effSort === "dpr") return u.dpr || 0;
     if (effSort === "wins") return u.wins || 0;
     if (effSort === "winPct") return (u.winPct || 0) + "%";
     return (u.standings || 0).toFixed(1);
+  }
+
+  // Streak indicator — 🔥 for 3+ wins in last 5 events, 📈 for 2 wins, else null
+  function streakBadge(u) {
+    if (mode !== "players" && mode !== "kings") return null;
+    var pl = u.placements || [];
+    if (pl.length < 3) return null;
+    var lastFive = pl.slice(-5);
+    var wins = lastFive.filter(function (x) { return x.pl === 1; }).length;
+    if (wins >= 3) return { emoji: "🔥", title: wins + " wins in last 5" };
+    if (wins >= 2) return { emoji: "📈", title: wins + " wins in last 5" };
+    return null;
   }
 
   function rowMetaText(u) {
@@ -3035,6 +3267,67 @@ function RankingsView(p) {
       </select>}
     </div>
 
+    {/* Window + Format filter chips */}
+    {(mode === "players" || mode === "crews" || mode === "kings" || mode === "judges") && <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+      {[
+        { id: "all", l: "All-time" },
+        { id: "year", l: "This year" },
+        { id: "6mo", l: "6 months" },
+        { id: "30d", l: "30 days" }
+      ].map(function (w) {
+        var active = winFilter === w.id;
+        return <button key={w.id} onClick={function () { setWinFilter(w.id); }} style={{
+          padding: "5px 11px", borderRadius: 6,
+          border: "1px solid " + (active ? "var(--ac)" : "var(--b1)"),
+          background: active ? "var(--ac2)" : "transparent",
+          color: active ? "var(--ac)" : "var(--dm)",
+          fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "JetBrains Mono", letterSpacing: ".05em"
+        }}>⏱ {w.l}</button>;
+      })}
+    </div>}
+    {(mode === "players" || mode === "crews" || mode === "kings") && <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+      {[
+        { id: "all", l: "All formats" },
+        { id: "solo", l: "Solo" },
+        { id: "2v2", l: "2v2" },
+        { id: "3v3", l: "3v3" },
+        { id: "4v4", l: "4v4" },
+        { id: "crew", l: "Crew" },
+        { id: "draft", l: "Draft" },
+        { id: "specialty", l: "Specialty" }
+      ].map(function (f) {
+        var active = fmtFilter === f.id;
+        return <button key={f.id} onClick={function () { setFmtFilter(f.id); }} style={{
+          padding: "5px 11px", borderRadius: 6,
+          border: "1px solid " + (active ? "var(--cr)" : "var(--b1)"),
+          background: active ? "var(--cr2)" : "transparent",
+          color: active ? "var(--cr)" : "var(--dm)",
+          fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "JetBrains Mono", letterSpacing: ".05em"
+        }}>{f.l}</button>;
+      })}
+    </div>}
+
+    {/* Search bar */}
+    <div style={{ marginBottom: 12, position: "relative" }}>
+      <input value={q} onChange={function (e) { setQ(e.target.value); }}
+        placeholder={"Search " + (mode === "crews" ? "crews" : mode === "judges" ? "judges" : mode === "kings" ? "kings" : mode === "cities" ? "cities" : mode === "states" ? "states" : mode === "countries" ? "countries" : "breakers") + "…"}
+        style={{
+          width: "100%", padding: "10px 14px 10px 36px", fontSize: 13,
+          background: "var(--inp)", border: "1px solid var(--b1)", borderRadius: 8,
+          color: "var(--tx)", outline: "none", fontFamily: "Epilogue", boxSizing: "border-box"
+        }}
+        onFocus={function (e) { e.target.style.borderColor = "var(--ac)"; }}
+        onBlur={function (e) { e.target.style.borderColor = "var(--b1)"; }} />
+      <span style={{
+        position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+        color: "var(--dm)", fontSize: 13, pointerEvents: "none"
+      }}>🔍</span>
+      {q && <button onClick={function () { setQ(""); }} style={{
+        position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+        background: "none", border: "none", color: "var(--dm)", cursor: "pointer", fontSize: 16
+      }}>✕</button>}
+    </div>
+
     {mode === "players" && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14 }}>
       <button onClick={function () { setLabelFilter(null) }} style={{
         padding: "5px 10px", borderRadius: 6,
@@ -3065,6 +3358,7 @@ function RankingsView(p) {
         var meta = rowMetaText(u);
         var spark = sparklineData(u);
         var subInfo = mode === "players" ? (u.city || u.country || ((u.crews || [])[0] || {}).name) : null;
+        var streak = streakBadge(u);
         return <div key={u.id || displayName} style={{
           display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
           borderBottom: "1px solid var(--b2)", animation: "fu .3s ease both",
@@ -3078,8 +3372,12 @@ function RankingsView(p) {
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <div style={{
               fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-            }}>{displayName}</div>
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              display: "flex", alignItems: "center", gap: 6
+            }}>
+              <span>{displayName}</span>
+              {streak && <span title={streak.title} style={{ fontSize: 13 }}>{streak.emoji}</span>}
+            </div>
             {subInfo && <div style={{
               fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1
@@ -3111,6 +3409,9 @@ function RankingsView(p) {
         sp.set("mode", mode);
         if (countryFilter !== "All") sp.set("country", countryFilter);
         sp.set("sort", effSort);
+        if (winFilter && winFilter !== "all") sp.set("window", winFilter);
+        if (fmtFilter && fmtFilter !== "all") sp.set("format", fmtFilter);
+        if (q && q.trim()) sp.set("q", q.trim());
         window.open("/?" + sp.toString(), "_blank");
       }} style={{
         padding: "8px 16px", borderRadius: 8,
@@ -7403,7 +7704,7 @@ function Admin(p) {
     <Crumbs items={[{ label: "Home", onClick: goHome }, { label: "Rankings" }]} />
     <RankingsView pR={stats.pR} cR={stats.cR}
       cityR={stats.cityR} stateR={stats.stateR} countryR={stats.countryR}
-      events={p.events} profiles={p.profiles}
+      events={p.events} extEvents={p.extEvents} profiles={p.profiles} crews={p.crews}
       onBack={function () { setView("home") }} />
   </div>;
 
