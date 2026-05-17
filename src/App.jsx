@@ -1789,6 +1789,109 @@ function Sparkline(p) {
   </svg>;
 }
 
+// ── Tiny typography pills (replace emoji badges) ──
+function StreakPill(p) {
+  if (!p.wins || p.wins < 2) return null;
+  var hot = p.wins >= 3;
+  return <span style={{
+    padding: "1px 6px", borderRadius: 3,
+    background: hot ? "var(--rd2)" : "var(--gd2)",
+    color: hot ? "var(--rd)" : "var(--gd)",
+    fontSize: 9, fontFamily: "JetBrains Mono", fontWeight: 800,
+    letterSpacing: ".12em", textTransform: "uppercase",
+    border: "1px solid " + (hot ? "var(--rd)" : "var(--gd)"),
+    flexShrink: 0
+  }} title={p.wins + " wins in last 5 events"}>{hot ? "ON FIRE" : "STREAK"}</span>;
+}
+function KingPill(p) {
+  if (!p.count) return null;
+  return <span style={{
+    padding: "1px 6px", borderRadius: 3,
+    background: "var(--gd2)", color: "var(--gd)",
+    fontSize: 9, fontFamily: "JetBrains Mono", fontWeight: 800,
+    letterSpacing: ".12em", textTransform: "uppercase",
+    border: "1px solid var(--gd)", flexShrink: 0
+  }} title="Crowned Cypher King">KING{p.count > 1 ? " ×" + p.count : ""}</span>;
+}
+
+// ── Compute win-streak count over last 5 placements ──
+function winStreakCount(u) {
+  var pl = u && u.placements;
+  if (!pl || pl.length < 2) return 0;
+  return pl.slice(-5).filter(function (x) { return x.pl === 1; }).length;
+}
+
+// ── Tier grouping: split a sorted list into 3-5 dancer cards ──
+function buildTiers(list) {
+  var tiers = [];
+  if (!list || list.length === 0) return tiers;
+  // Tier 0: top 3 (the podium)
+  tiers.push({ id: "t0", title: "TOP 3", items: list.slice(0, 3), startRank: 1, defaultOpen: true });
+  if (list.length <= 3) return tiers;
+  // Subsequent tiers of 5
+  var i = 3;
+  var t = 1;
+  while (i < list.length) {
+    var end = Math.min(i + 5, list.length);
+    tiers.push({
+      id: "t" + t,
+      title: "RANKS " + (i + 1) + "–" + end,
+      items: list.slice(i, end),
+      startRank: i + 1,
+      defaultOpen: t === 1   // only the next-after-podium tier opens by default
+    });
+    i = end; t++;
+  }
+  return tiers;
+}
+
+// ── Reusable collapsible tier card. renderRow(item, rank) returns JSX. ──
+function TierCard(p) {
+  var _o = useState(!!p.defaultOpen), open = _o[0], setOpen = _o[1];
+  var items = p.items || [];
+  var compact = !!p.compact;
+  return <div style={{
+    background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10,
+    marginBottom: 8, overflow: "hidden", animation: "fu .3s ease both"
+  }}>
+    <button onClick={function () { setOpen(!open); }} style={{
+      width: "100%", display: "flex", alignItems: "center", gap: 10,
+      padding: compact ? "10px 12px" : "12px 16px",
+      background: "transparent", border: "none", cursor: "pointer",
+      borderBottom: open ? "1px solid var(--b2)" : "1px solid transparent",
+      transition: "border-color .15s"
+    }}>
+      <span style={{
+        fontSize: compact ? 11 : 12, fontFamily: "JetBrains Mono", fontWeight: 800,
+        letterSpacing: ".15em", color: "var(--tx)"
+      }}>{p.title}</span>
+      <span style={{
+        fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)",
+        marginLeft: 4
+      }}>· {items.length}</span>
+      {!open && items.length > 0 && <div style={{
+        flex: 1, display: "flex", alignItems: "center", gap: 4,
+        marginLeft: 8, overflow: "hidden"
+      }}>
+        {items.slice(0, 5).map(function (u, i) {
+          var nm = u.breakingName || u.name || "?";
+          return <Av key={i} name={nm} sz={compact ? 20 : 22} isCrew={!!p.isCrew} />;
+        })}
+      </div>}
+      <span style={{ flex: open ? 1 : 0 }} />
+      <span style={{
+        fontSize: 14, color: "var(--dm)", fontFamily: "JetBrains Mono",
+        transform: open ? "rotate(180deg)" : "none", transition: "transform .15s"
+      }}>⌃</span>
+    </button>
+    {open && <div style={{ animation: "fl .25s ease" }}>
+      {items.map(function (u, i) {
+        return <div key={u.id || (u.breakingName || u.name) + i}>{p.renderRow(u, p.startRank + i)}</div>;
+      })}
+    </div>}
+  </div>;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // PLACEMENT CHIPS (breakdown for rankings)
 // ═══════════════════════════════════════════════════════════════
@@ -2797,13 +2900,31 @@ function LeaderboardEmbed(p) {
 
     {showPodium && <Podium top3={list.slice(0, 3)} sort={sort} isCrew={isCrew} />}
 
-    {list.length === 0 ? <Crd>
-      <div style={{ padding: 20, textAlign: "center", color: "var(--dm)", fontSize: 12 }}>
-        No data for this view.
-      </div>
-    </Crd> : <Crd sx={{ padding: 0, overflow: "hidden" }}>
-      {list.slice(showPodium ? 3 : 0).map(function (u, i) {
-        var rank = (showPodium ? 3 : 0) + i + 1;
+    {(function () {
+      if (list.length === 0) return <Crd>
+        <div style={{ padding: 20, textAlign: "center", color: "var(--dm)", fontSize: 12 }}>
+          No data for this view.
+        </div>
+      </Crd>;
+      var afterPodium = list.slice(showPodium ? 3 : 0);
+      if (afterPodium.length === 0) return null;
+
+      var tiers = [];
+      var startRank = showPodium ? 4 : 1;
+      var i = 0, tIdx = 0;
+      while (i < afterPodium.length) {
+        var end = Math.min(i + 5, afterPodium.length);
+        tiers.push({
+          id: "et" + tIdx,
+          title: "RANKS " + (startRank + i) + "–" + (startRank + end - 1),
+          items: afterPodium.slice(i, end),
+          startRank: startRank + i,
+          defaultOpen: tIdx === 0
+        });
+        i = end; tIdx++;
+      }
+
+      function renderRow(u, rank) {
         var displayName = u.breakingName || u.name;
         var subInfo = (mode === "players" || mode === "kings") ? (u.city || u.country) : null;
         var meta = mode === "crews" ? (u.eventsCount + " events · " + u.wins + " wins")
@@ -2811,8 +2932,8 @@ function LeaderboardEmbed(p) {
           : (mode === "cities" || mode === "states") ? ((u.players || 0) + " breakers · " + (u.wins || 0) + " wins")
           : null;
         var spark = ((mode === "players" || mode === "kings") && u.placements) ? u.placements.slice(-8).map(function (pl) { return pl.pts || 0; }) : null;
-        var streak = streakBadge(u);
-        return <div key={u.id || displayName} style={{
+        var wins = winStreakCount(u);
+        return <div style={{
           display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
           borderBottom: "1px solid var(--b2)"
         }}>
@@ -2824,11 +2945,11 @@ function LeaderboardEmbed(p) {
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <div style={{
               fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              display: "flex", alignItems: "center", gap: 4
+              display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap"
             }}>
-              <span>{displayName}</span>
-              {streak && <span style={{ fontSize: 11 }}>{streak}</span>}
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+              <StreakPill wins={wins} />
+              <KingPill count={u.cypherKings} />
             </div>
             {subInfo && <div style={{
               fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
@@ -2847,8 +2968,14 @@ function LeaderboardEmbed(p) {
             color: sortCol, minWidth: 42, textAlign: "right"
           }}>{valueOf(u)}</div>
         </div>;
-      })}
-    </Crd>}
+      }
+
+      return tiers.map(function (tier) {
+        return <TierCard key={tier.id} title={tier.title} items={tier.items}
+          startRank={tier.startRank} defaultOpen={tier.defaultOpen}
+          compact={true} isCrew={isCrew} renderRow={renderRow} />;
+      });
+    })()}
 
     {/* Footer: click-through to full Cypher Net */}
     <div style={{ marginTop: 14, textAlign: "center" }}>
@@ -3351,18 +3478,40 @@ function RankingsView(p) {
 
     {showPodium && <Podium top3={list.slice(0, 3)} sort={effSort} isCrew={mode === "crews"} />}
 
-    <Crd sx={{ padding: 0, overflow: "hidden" }}>
-      {list.slice(showPodium ? 3 : 0).map(function (u, i) {
-        var rank = (showPodium ? 3 : 0) + i + 1;
+    {(function () {
+      var afterPodium = list.slice(showPodium ? 3 : 0);
+      if (list.length === 0) return <Crd>
+        <div style={{ padding: 36, textAlign: "center", color: "var(--dm)" }}>
+          {mode === "judges" ? "No judges recorded yet — set judge names on an event." : "No data yet"}
+        </div>
+      </Crd>;
+      if (afterPodium.length === 0) return null;
+
+      // Build tier cards (5 dancers each)
+      var tiers = [];
+      var startRank = showPodium ? 4 : 1;
+      var i = 0, tIdx = 0;
+      while (i < afterPodium.length) {
+        var end = Math.min(i + 5, afterPodium.length);
+        tiers.push({
+          id: "rt" + tIdx,
+          title: "RANKS " + (startRank + i) + "–" + (startRank + end - 1),
+          items: afterPodium.slice(i, end),
+          startRank: startRank + i,
+          defaultOpen: tIdx === 0
+        });
+        i = end; tIdx++;
+      }
+
+      function renderRow(u, rank) {
         var displayName = u.breakingName || u.name;
         var meta = rowMetaText(u);
         var spark = sparklineData(u);
-        var subInfo = mode === "players" ? (u.city || u.country || ((u.crews || [])[0] || {}).name) : null;
-        var streak = streakBadge(u);
-        return <div key={u.id || displayName} style={{
+        var subInfo = (mode === "players" || mode === "kings") ? (u.city || u.country || ((u.crews || [])[0] || {}).name) : null;
+        var wins = winStreakCount(u);
+        return <div style={{
           display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
-          borderBottom: "1px solid var(--b2)", animation: "fu .3s ease both",
-          animationDelay: (i * 0.02) + "s"
+          borderBottom: "1px solid var(--b2)"
         }}>
           <span style={{
             fontSize: 15, fontWeight: 900, fontFamily: "JetBrains Mono",
@@ -3372,15 +3521,15 @@ function RankingsView(p) {
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <div style={{
               fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              display: "flex", alignItems: "center", gap: 6
+              display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"
             }}>
-              <span>{displayName}</span>
-              {streak && <span title={streak.title} style={{ fontSize: 13 }}>{streak.emoji}</span>}
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{displayName}</span>
+              <StreakPill wins={wins} />
+              <KingPill count={u.cypherKings} />
             </div>
             {subInfo && <div style={{
               fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2
             }}>{subInfo}</div>}
             <div style={{ marginTop: 3 }}>
               {mode === "players" ? <PlacementChips placements={u.placements} /> :
@@ -3395,11 +3544,14 @@ function RankingsView(p) {
             color: sortVal.col, minWidth: 54, textAlign: "right"
           }}>{valueOf(u)}</div>
         </div>;
-      })}
-      {list.length === 0 && <div style={{ padding: 36, textAlign: "center", color: "var(--dm)" }}>
-        {mode === "judges" ? "No judges recorded yet — set judge names on an event." : "No data yet"}
-      </div>}
-    </Crd>
+      }
+
+      return tiers.map(function (tier) {
+        return <TierCard key={tier.id} title={tier.title} items={tier.items}
+          startRank={tier.startRank} defaultOpen={tier.defaultOpen}
+          isCrew={mode === "crews"} renderRow={renderRow} />;
+      });
+    })()}
 
     {list.length > 0 && <div style={{ marginTop: 14, textAlign: "center" }}>
       <button onClick={function () {
