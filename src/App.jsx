@@ -305,24 +305,24 @@ var COUNTRIES = [
 
 var FONT_URL = "https://fonts.googleapis.com/css2?family=Anton&family=Epilogue:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&display=swap";
 
-// Cypher Space theme — light, cream bg, deep electric-purple accent.
+// Cypher Space theme — light, cream bg, electric-purple signature.
 var CV = {
-  "--bg": "#f4f4f3", "--c1": "#ffffff", "--c2": "#eeeeec", "--inp": "#ffffff",
-  "--b1": "#d4d4d2", "--b2": "#e8e8e6", "--tx": "#0a0a0a", "--dm": "#5a5a5a",
-  "--ac": "#3a1fcb", "--ac2": "rgba(58,31,203,.12)",
-  "--gd": "#a35200", "--gd2": "rgba(163,82,0,.14)",
-  "--jd": "#1f3acb", "--jd2": "rgba(31,58,203,.12)",
-  "--rd": "#c0392b", "--rd2": "rgba(192,57,43,.12)",
-  "--bl": "#1f3acb", "--bl2": "rgba(31,58,203,.12)",
-  "--gn": "#0d6e3e", "--gn2": "rgba(13,110,62,.14)",
-  "--cr": "#3a1fcb", "--cr2": "rgba(58,31,203,.12)",
-  "--wn": "rgba(163,82,0,.16)"
+  "--bg": "#f4f4f3", "--c1": "#ffffff", "--c2": "#ecebe8", "--inp": "#ffffff",
+  "--b1": "#dad9d6", "--b2": "#ebeae7", "--tx": "#111111", "--dm": "#737373",
+  "--ac": "#3a1fcb", "--ac2": "rgba(58,31,203,.10)",
+  "--gd": "#b8860b", "--gd2": "rgba(184,134,11,.14)",
+  "--jd": "#2563eb", "--jd2": "rgba(37,99,235,.10)",
+  "--rd": "#dc2626", "--rd2": "rgba(220,38,38,.10)",
+  "--bl": "#2563eb", "--bl2": "rgba(37,99,235,.10)",
+  "--gn": "#15803d", "--gn2": "rgba(21,128,61,.12)",
+  "--cr": "#7c3aed", "--cr2": "rgba(124,58,237,.10)",
+  "--wn": "rgba(184,134,11,.16)"
 };
 
 var GCSS = `
 *{box-sizing:border-box;margin:0}
-body{background:#f4f4f3;color:#0a0a0a;font-family:Epilogue,system-ui,sans-serif;font-size:16px;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
-h1,h2,h3{font-family:Anton,Impact,sans-serif;letter-spacing:.01em;text-transform:uppercase;font-weight:400}
+body{background:#f4f4f3;color:#111111;font-family:Epilogue,system-ui,sans-serif;font-size:16px;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
+h1,h2,h3{font-family:Epilogue,system-ui,sans-serif;letter-spacing:-.01em;font-weight:700}
 input,textarea,select,button{font-family:Epilogue,system-ui,sans-serif;font-size:15px}
 input,textarea,select{font-size:16px}  /* prevent iOS zoom on focus */
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
@@ -724,7 +724,7 @@ function Btn(p) {
   };
   var s = m[p.v || "pri"] || m.pri;
   return (<button onClick={p.onClick} disabled={p.disabled} style={Object.assign({
-    padding: "12px 20px", borderRadius: 10, fontSize: 15, fontWeight: 700, fontFamily: "Anton",
+    padding: "12px 20px", borderRadius: 10, fontSize: 15, fontWeight: 700, fontFamily: "Epilogue",
     letterSpacing: ".06em", cursor: p.disabled ? "not-allowed" : "pointer", textTransform: "uppercase",
     transition: "transform .15s, filter .15s"
   }, s, p.sx || {})}
@@ -927,7 +927,7 @@ function Tag(p) {
 function TBtn(p) {
   return <button onClick={p.onClick} title={p.title || undefined} style={{
     padding: "10px 16px", border: "none", borderRadius: "8px 8px 0 0",
-    fontFamily: "Anton", fontSize: 14, fontWeight: 700, cursor: "pointer",
+    fontFamily: "Epilogue", fontSize: 14, fontWeight: 700, cursor: "pointer",
     background: p.active ? "var(--c1)" : "transparent",
     color: p.active ? "var(--ac)" : "var(--dm)",
     borderBottom: p.active ? "3px solid var(--ac)" : "3px solid transparent",
@@ -946,7 +946,7 @@ function Av(p) {
     background: "hsl(" + c + "," + (p.isCrew ? "50%,22%" : "55%,28%") + ")",
     display: "flex", alignItems: "center", justifyContent: "center",
     fontSize: (p.sz || 34) * .42, fontWeight: 800, color: "#fff",
-    fontFamily: "Anton",
+    fontFamily: "Epilogue",
     border: "2px solid " + (p.isCrew ? "var(--cr)" : "var(--b1)"), flexShrink: 0
   }}>{(p.name || "?")[0].toUpperCase()}</div>;
 }
@@ -1013,7 +1013,7 @@ function Modal(p) {
       padding: 24, animation: "fu .25s ease"
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-        <div>{p.title && <h2 style={{ fontFamily: "Anton", fontSize: 22, color: "var(--tx)" }}>{p.title}</h2>}</div>
+        <div>{p.title && <h2 style={{ fontFamily: "Epilogue", fontSize: 22, color: "var(--tx)" }}>{p.title}</h2>}</div>
         <button onClick={p.onClose} style={{
           background: "var(--c2)", border: "none", color: "var(--dm)",
           width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: 16
@@ -1063,7 +1063,7 @@ function EmptyState(p) {
   }}>
     {p.icon && <div style={{ fontSize: 36, marginBottom: 10, opacity: .7 }}>{p.icon}</div>}
     <div style={{
-      fontSize: 17, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)", marginBottom: 6
+      fontSize: 17, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)", marginBottom: 6
     }}>{p.title}</div>
     {p.subtitle && <div style={{
       fontSize: 13, color: "var(--dm)", fontFamily: "Epilogue", marginBottom: p.cta ? 14 : 0,
@@ -1109,7 +1109,7 @@ function ToastContainer(p) {
         {t.onUndo && <button onClick={function () { p.onUndo(t.id); }} style={{
           background: "var(--ac2)", color: "var(--ac)", border: "1px solid var(--ac)",
           borderRadius: 7, padding: "6px 12px", cursor: "pointer",
-          fontSize: 12, fontWeight: 800, fontFamily: "Anton", letterSpacing: ".05em"
+          fontSize: 12, fontWeight: 800, fontFamily: "Epilogue", letterSpacing: ".05em"
         }}>UNDO</button>}
         <button onClick={function () { p.onDismiss(t.id); }} style={{
           background: "none", border: "none", color: "var(--dm)", cursor: "pointer",
@@ -1300,7 +1300,7 @@ function PlayerSearch(p) {
         }}>
           <Av name={pr.breakingName} sz={28} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Anton" }}>{pr.breakingName}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Epilogue" }}>{pr.breakingName}</div>
             <div style={{ fontSize: 11, color: "var(--dm)" }}>{pr.fullName}</div>
           </div>
         </button>;
@@ -1309,7 +1309,7 @@ function PlayerSearch(p) {
         display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
         background: "var(--ac2)", border: "none", borderTop: filt.length > 0 ? "1px solid var(--b2)" : "none",
         cursor: "pointer", textAlign: "left", width: "100%", color: "var(--ac)",
-        fontFamily: "Anton", fontSize: 14, fontWeight: 700
+        fontFamily: "Epilogue", fontSize: 14, fontWeight: 700
       }}>
         <span style={{ fontSize: 16 }}>+</span>
         <span>Add "{q.trim()}" as new breaker</span>
@@ -1354,7 +1354,7 @@ function CrewSearch(p) {
         }}>
           <Av name={cr.name} sz={28} isCrew />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Anton", color: "var(--cr)" }}>{cr.name}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Epilogue", color: "var(--cr)" }}>{cr.name}</div>
             {cr.location && <div style={{ fontSize: 11, color: "var(--dm)" }}>{cr.location}</div>}
           </div>
         </button>;
@@ -1425,7 +1425,7 @@ function CrewEntryForm(p) {
       background: on ? "var(--cr2)" : "transparent",
       color: on ? "var(--cr)" : "var(--dm)",
       fontSize: 11, fontWeight: 700, cursor: "pointer",
-      fontFamily: "Anton", textTransform: "uppercase"
+      fontFamily: "Epilogue", textTransform: "uppercase"
     }}>{label}</button>;
   }
 
@@ -1439,7 +1439,7 @@ function CrewEntryForm(p) {
       <Lbl>Pick Crew</Lbl>
       {selCrew ? <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "var(--c1)", border: "1px solid var(--cr)", borderRadius: 10 }}>
         <Av name={selCrew.name} sz={30} isCrew />
-        <div style={{ flex: 1, fontSize: 15, fontWeight: 700, fontFamily: "Anton", color: "var(--cr)" }}>{selCrew.name}</div>
+        <div style={{ flex: 1, fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--cr)" }}>{selCrew.name}</div>
         <button onClick={function () { setSelCrew(null); setPicked([]) }} style={{ background: "none", border: "none", color: "var(--dm)", cursor: "pointer", fontSize: 14 }}>Change</button>
       </div> : <CrewSearch crews={p.crews} onSelect={setSelCrew} />}
     </div>}
@@ -1460,7 +1460,7 @@ function CrewEntryForm(p) {
       <Lbl>{"Dancers (" + picked.length + (requiredSize > 0 ? " / " + requiredSize : "") + ") · " + sizeLabel}</Lbl>
       {picked.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
         {picked.map(function (m, i) {
-          return <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8, fontSize: 12, fontFamily: "Anton", color: "var(--tx)" }}>
+          return <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8, fontSize: 12, fontFamily: "Epilogue", color: "var(--tx)" }}>
             <span>{m.name}</span>
             {!m.pid && <span style={{ fontSize: 9, color: "var(--dm)" }}>manual</span>}
             <button onClick={function () { removePicked(i) }} style={{ background: "none", border: "none", color: "var(--dm)", cursor: "pointer", fontSize: 12 }}>✕</button>
@@ -1476,7 +1476,7 @@ function CrewEntryForm(p) {
               padding: "6px 10px", background: isOn ? "var(--cr2)" : "var(--c1)",
               border: "1px solid " + (isOn ? "var(--cr)" : "var(--b1)"),
               borderRadius: 8, cursor: "pointer", fontSize: 12,
-              fontFamily: "Anton", color: isOn ? "var(--cr)" : "var(--tx)"
+              fontFamily: "Epilogue", color: isOn ? "var(--cr)" : "var(--tx)"
             }}>{(isOn ? "✓ " : "+ ") + pr.breakingName}</button>;
           })}
         </div>
@@ -1631,7 +1631,7 @@ function BracketCanvas(p) {
                   <div style={{
                     fontSize: 13, fontWeight: isW ? 800 : 500,
                     color: pl2 ? (isW ? "var(--gd)" : "var(--tx)") : "var(--dm)",
-                    fontFamily: "Anton", whiteSpace: "nowrap",
+                    fontFamily: "Epilogue", whiteSpace: "nowrap",
                     overflow: "hidden", textOverflow: "ellipsis"
                   }}>{pl2 ? pl2.name : "TBD"}</div>
                 </div>
@@ -1702,7 +1702,7 @@ function Podium(p) {
         </div>
         <div style={{
           fontSize: isChamp ? 17 : 14, fontWeight: 800,
-          fontFamily: "Anton", color: "var(--tx)",
+          fontFamily: "Epilogue", color: "var(--tx)",
           marginTop: 8, textAlign: "center",
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%"
         }}>{u.breakingName || u.name}</div>
@@ -1727,7 +1727,7 @@ function Podium(p) {
           borderRight: "1px solid " + col + "33",
           borderRadius: "10px 10px 2px 2px",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          fontFamily: "Anton", color: col,
+          fontFamily: "Epilogue", color: col,
           boxShadow: "inset 0 -8px 0 rgba(0,0,0,.2)"
         }}>
           <div style={{ fontSize: isChamp ? 48 : 36, fontWeight: 900, lineHeight: 1 }}>{pos}</div>
@@ -1805,7 +1805,7 @@ function ExtEventEditor(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onCancel} />
-    <h2 style={{ fontFamily: "Anton", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>
+    <h2 style={{ fontFamily: "Epilogue", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>
       {isNew ? "Add External Event" : "Edit External Event"}
     </h2>
     <Crd>
@@ -1859,7 +1859,7 @@ function ExtEventEditor(p) {
         background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, marginBottom: 5
       }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{en.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{en.name}</div>
         </div>
         <Tag>{en.placement}</Tag>
         {en.customPts !== undefined && <Tag c="var(--gd)" bg="var(--gd2)">{en.customPts + "pts"}</Tag>}
@@ -1903,7 +1903,7 @@ function PlayerEditor(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onCancel} />
-    <h2 style={{ fontFamily: "Anton", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>
+    <h2 style={{ fontFamily: "Epilogue", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>
       {isNew ? "Add Breaker" : "Edit Breaker"}
     </h2>
     <Crd>
@@ -1921,7 +1921,7 @@ function PlayerEditor(p) {
           border: "2px solid " + (inVan ? "var(--jd)" : "var(--b1)"),
           background: inVan ? "var(--jd2)" : "transparent",
           color: inVan ? "var(--jd)" : "var(--dm)",
-          fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Anton",
+          fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
           letterSpacing: 0.5, textTransform: "uppercase"
         }}>
@@ -1943,7 +1943,7 @@ function PlayerEditor(p) {
               border: "1px solid " + (labels.includes(lb) ? col : "var(--b1)"),
               background: labels.includes(lb) ? col + "22" : "transparent",
               color: labels.includes(lb) ? col : "var(--dm)",
-              fontSize: 12, cursor: "pointer", fontFamily: "Anton"
+              fontSize: 12, cursor: "pointer", fontFamily: "Epilogue"
             }}>{lb}</button>;
           })}
         </div>
@@ -1957,7 +1957,7 @@ function PlayerEditor(p) {
               border: "2px solid " + (selC.includes(cr.id) ? "var(--cr)" : "var(--b1)"),
               background: selC.includes(cr.id) ? "var(--cr2)" : "transparent",
               color: selC.includes(cr.id) ? "var(--cr)" : "var(--dm)",
-              fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Anton"
+              fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue"
             }}>{cr.name}</button>;
           })}
         </div>
@@ -1973,7 +1973,7 @@ function PlayerEditor(p) {
               border: "2px solid " + (pri === cid ? "var(--gd)" : "var(--b1)"),
               background: pri === cid ? "var(--gd2)" : "transparent",
               color: pri === cid ? "var(--gd)" : "var(--dm)",
-              fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Anton"
+              fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue"
             }}>{cr.name + (pri === cid ? " ★" : "")}</button>;
           })}
         </div>
@@ -2015,7 +2015,7 @@ function CrewEditor(p) {
   var nonMembers = cr ? p.profiles.filter(function (pr) { return !pr.crews || !pr.crews.some(function (c) { return c.id === cr.id }) }) : [];
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onCancel} />
-    <h2 style={{ fontFamily: "Anton", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>
+    <h2 style={{ fontFamily: "Epilogue", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>
       {isNew ? "Add Crew" : "Edit Crew"}
     </h2>
     <Crd>
@@ -2040,7 +2040,7 @@ function CrewEditor(p) {
           background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, marginBottom: 5
         }}>
           <Av name={pr.breakingName} sz={30} />
-          <div style={{ flex: 1, fontSize: 14, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{pr.breakingName}</div>
+          <div style={{ flex: 1, fontSize: 14, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pr.breakingName}</div>
           <Btn v="gh" onClick={function () { p.onEditPlayer(pr) }} sx={{ fontSize: 10, padding: "5px 8px" }}>Edit</Btn>
           <button onClick={function () {
             p.setProfiles(function (prev) {
@@ -2069,7 +2069,7 @@ function CrewEditor(p) {
               });
             }} style={{
               padding: "6px 10px", background: "var(--c2)", border: "1px solid var(--b1)",
-              borderRadius: 8, cursor: "pointer", fontSize: 12, fontFamily: "Anton", color: "var(--tx)"
+              borderRadius: 8, cursor: "pointer", fontSize: 12, fontFamily: "Epilogue", color: "var(--tx)"
             }}>{"+ " + pr.breakingName}</button>;
           })}
         </div>
@@ -2158,7 +2158,7 @@ function EventForm(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onCancel} />
-    <h2 style={{ fontFamily: "Anton", fontSize: 26, color: "var(--tx)", marginBottom: 4 }}>{isNew ? "Plan Event" : "Edit Event"}</h2>
+    <h2 style={{ fontFamily: "Epilogue", fontSize: 26, color: "var(--tx)", marginBottom: 4 }}>{isNew ? "Plan Event" : "Edit Event"}</h2>
     <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 16 }}>Fill out as much as you want — optional details show up on the event page.</div>
 
     <Crd>
@@ -2200,7 +2200,7 @@ function EventForm(p) {
               border: "2px solid " + (active ? L.color : "var(--b1)"),
               background: active ? (L.color + "22") : "transparent",
               color: active ? L.color : "var(--dm)",
-              fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "Anton", textAlign: "left"
+              fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "Epilogue", textAlign: "left"
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span>{L.l}</span>
@@ -2246,7 +2246,7 @@ function EventForm(p) {
                   border: "2px solid " + (active ? "var(--ac)" : "var(--b1)"),
                   background: active ? "var(--ac2)" : "transparent",
                   color: active ? "var(--ac)" : "var(--dm)",
-                  fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Anton"
+                  fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue"
                 }}>{f.l}</button>;
               })}
             </div>
@@ -2310,7 +2310,7 @@ function EventForm(p) {
           if (allowed.length === 1) return <div style={{ flex: "1 1 220px" }}>
             <Lbl>Bracket Size</Lbl>
             <div style={{
-              padding: "14px 18px", borderRadius: 10, fontFamily: "Anton",
+              padding: "14px 18px", borderRadius: 10, fontFamily: "Epilogue",
               border: "2px solid var(--ac)", background: "var(--ac2)", color: "var(--ac)",
               fontSize: 18, fontWeight: 800, display: "inline-block", letterSpacing: ".04em"
             }}>{"Top " + allowed[0]}<span style={{ marginLeft: 8, fontSize: 11, fontFamily: "JetBrains Mono", opacity: .7 }}>LOCKED</span></div>
@@ -2328,7 +2328,7 @@ function EventForm(p) {
                 border: "2px solid " + (active ? "var(--ac)" : "var(--b1)"),
                 background: active ? "var(--ac2)" : "transparent",
                 color: active ? "var(--ac)" : "var(--dm)",
-                cursor: "pointer", fontFamily: "Anton",
+                cursor: "pointer", fontFamily: "Epilogue",
                 boxShadow: active ? "0 0 12px rgba(240,94,35,.25)" : "none",
                 transition: "all .15s"
               }}>
@@ -2377,7 +2377,7 @@ function EventForm(p) {
       </div>
       {["r16", "r8", "r4", "r2", "final"].map(function (sk) {
         return <div key={sk} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 100%", fontSize: 13, fontFamily: "Anton", color: "var(--tx)" }}>{STAGE_LABELS[sk]}</div>
+          <div style={{ flex: "1 1 100%", fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)" }}>{STAGE_LABELS[sk]}</div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
             {[1, 3, 5, 7].map(function (n) {
               var active = (rps[sk] || STAGE_DEFAULTS[sk]) === n;
@@ -2405,7 +2405,7 @@ function EventForm(p) {
         {djs.map(function (n, i) {
           return <span key={i} style={{
             display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 9px",
-            background: "var(--jd2)", color: "var(--jd)", borderRadius: 6, fontSize: 12, fontFamily: "Anton"
+            background: "var(--jd2)", color: "var(--jd)", borderRadius: 6, fontSize: 12, fontFamily: "Epilogue"
           }}>{n}<button onClick={function () { setDjs(djs.filter(function (_, j) { return j !== i })) }} style={{ background: "none", border: "none", color: "var(--jd)", cursor: "pointer", fontSize: 12 }}>✕</button></span>;
         })}
       </div>
@@ -2418,7 +2418,7 @@ function EventForm(p) {
         {mcs.map(function (n, i) {
           return <span key={i} style={{
             display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 9px",
-            background: "var(--cr2)", color: "var(--cr)", borderRadius: 6, fontSize: 12, fontFamily: "Anton"
+            background: "var(--cr2)", color: "var(--cr)", borderRadius: 6, fontSize: 12, fontFamily: "Epilogue"
           }}>{n}<button onClick={function () { setMcs(mcs.filter(function (_, j) { return j !== i })) }} style={{ background: "none", border: "none", color: "var(--cr)", cursor: "pointer", fontSize: 12 }}>✕</button></span>;
         })}
       </div>
@@ -2467,7 +2467,7 @@ function PlayerDetail(p) {
     <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 16 }}>
       <Av name={pr.breakingName} sz={64} />
       <div style={{ flex: 1 }}>
-        <h2 style={{ fontFamily: "Anton", fontSize: 26, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8 }}>
+        <h2 style={{ fontFamily: "Epilogue", fontSize: 26, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8 }}>
           {pr.breakingName}
           {isActive(pr) && <span title="Currently active in your scene" style={{
             fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700,
@@ -2488,7 +2488,7 @@ function PlayerDetail(p) {
         var col = LABEL_COLORS[lb];
         return <span key={lb} style={{
           fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 5,
-          color: col, background: col + "22", fontFamily: "Anton", letterSpacing: ".04em"
+          color: col, background: col + "22", fontFamily: "Epilogue", letterSpacing: ".04em"
         }}>{lb}</span>;
       })}
     </div>}
@@ -2512,7 +2512,7 @@ function PlayerDetail(p) {
           display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
           background: "var(--c2)", borderRadius: 8, marginBottom: 4, fontSize: 13
         }}>
-          <div style={{ flex: 1, color: "var(--tx)", fontFamily: "Anton" }}>{pl.ev}</div>
+          <div style={{ flex: 1, color: "var(--tx)", fontFamily: "Epilogue" }}>{pl.ev}</div>
           <Tag c={pl.pl === 1 ? "var(--gd)" : pl.pl === 2 ? "#d1d5db" : "var(--dm)"}
             bg={pl.pl === 1 ? "var(--gd2)" : "var(--c1)"}>{PLACE_LABEL[pl.pl] || pl.pl}</Tag>
           {pl.type === "external" && <Tag c="var(--cr)" bg="var(--cr2)">EXT</Tag>}
@@ -2529,7 +2529,7 @@ function PlayerDetail(p) {
             padding: "5px 10px", borderRadius: 7,
             background: isPri ? "var(--gd2)" : "var(--cr2)",
             color: isPri ? "var(--gd)" : "var(--cr)",
-            fontSize: 12, fontWeight: 700, fontFamily: "Anton"
+            fontSize: 12, fontWeight: 700, fontFamily: "Epilogue"
           }}>{c.name}{isPri && " ★"}</span>;
         })}
       </div>
@@ -2660,7 +2660,7 @@ function LeaderboardEmbed(p) {
         <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", marginBottom: 2 }}>
           🏆 LEADERBOARD
         </div>
-        <h2 style={{ fontFamily: "Anton", fontSize: 18, color: "var(--tx)", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <h2 style={{ fontFamily: "Epilogue", fontSize: 18, color: "var(--tx)", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {modeTitle(mode, cfg.country)}
         </h2>
       </div>
@@ -2698,7 +2698,7 @@ function LeaderboardEmbed(p) {
           <Av name={displayName} sz={28} isCrew={isCrew} />
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <div style={{
-              fontSize: 13, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)",
+              fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
             }}>{displayName}</div>
             {subInfo && <div style={{
@@ -2778,7 +2778,7 @@ function EmbedHelp() {
     <div style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em" }}>📺 EMBED WIDGET</div>
-        <h1 style={{ fontFamily: "Anton", fontSize: 28, color: "var(--tx)", marginBottom: 14 }}>Leaderboard Embed</h1>
+        <h1 style={{ fontFamily: "Epilogue", fontSize: 28, color: "var(--tx)", marginBottom: 14 }}>Leaderboard Embed</h1>
         <p style={{ fontSize: 13, color: "var(--dm)", marginBottom: 16, lineHeight: 1.5 }}>
           Drop this iframe on any website — your blog, event page, crew site, anywhere. It updates live as you score matches. No login or tokens needed.
         </p>
@@ -2787,7 +2787,7 @@ function EmbedHelp() {
           <Lbl>Mode</Lbl>
           <select value={mode} onChange={function (e) { setMode(e.target.value); }} style={{
             width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
-            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Anton", marginBottom: 10
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue", marginBottom: 10
           }}>
             <option value="players">Top Breakers</option>
             <option value="crews">Top Crews</option>
@@ -2806,7 +2806,7 @@ function EmbedHelp() {
             <Lbl>Sort by</Lbl>
             <select value={sort} onChange={function (e) { setSort(e.target.value); }} style={{
               width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
-              color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Anton", marginBottom: 10
+              color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue", marginBottom: 10
             }}>
               <option value="dpr">DPR</option>
               <option value="wins">Wins</option>
@@ -2824,7 +2824,7 @@ function EmbedHelp() {
               <Lbl>Theme</Lbl>
               <select value={theme} onChange={function (e) { setTheme(e.target.value); }} style={{
                 width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
-                color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Anton"
+                color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
               }}>
                 <option value="dark">Dark</option>
                 <option value="light">Light</option>
@@ -2992,7 +2992,7 @@ function RankingsView(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onBack} />
-    <h2 style={{ fontFamily: "Anton", fontSize: 26, color: "var(--tx)", marginBottom: 12 }}>Rankings</h2>
+    <h2 style={{ fontFamily: "Epilogue", fontSize: 26, color: "var(--tx)", marginBottom: 12 }}>Rankings</h2>
 
     <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
       {MODE_TABS.map(function (t) {
@@ -3002,7 +3002,7 @@ function RankingsView(p) {
           border: "2px solid " + (active ? t.col : "var(--b1)"),
           background: active ? t.bg : "transparent",
           color: active ? t.col : "var(--dm)",
-          fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Anton",
+          fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue",
           textTransform: "uppercase", letterSpacing: ".05em", whiteSpace: "nowrap"
         }}>{t.l}</button>;
       })}
@@ -3041,7 +3041,7 @@ function RankingsView(p) {
         border: "1px solid " + (!labelFilter ? "var(--ac)" : "var(--b1)"),
         background: !labelFilter ? "var(--ac2)" : "transparent",
         color: !labelFilter ? "var(--ac)" : "var(--dm)",
-        fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Anton"
+        fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue"
       }}>All</button>
       {LABELS.map(function (lb) {
         var col = LABEL_COLORS[lb];
@@ -3051,7 +3051,7 @@ function RankingsView(p) {
           border: "1px solid " + (active ? col : "var(--b1)"),
           background: active ? col + "22" : "transparent",
           color: active ? col : "var(--dm)",
-          fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Anton"
+          fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue"
         }}>{lb}</button>;
       })}
     </div>}
@@ -3077,7 +3077,7 @@ function RankingsView(p) {
           <Av name={displayName} sz={34} isCrew={mode === "crews"} />
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <div style={{
-              fontSize: 15, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)",
+              fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
             }}>{displayName}</div>
             {subInfo && <div style={{
@@ -3217,7 +3217,7 @@ function JudgePortal(p) {
   })}>
     <AppHead />
     <h1 style={{
-      fontFamily: "Anton", fontSize: 30, color: "var(--jd)",
+      fontFamily: "Epilogue", fontSize: 30, color: "var(--jd)",
       textAlign: "center", marginBottom: 20, paddingTop: 32
     }}>Judge Portal</h1>
     {active.length === 0 && <div style={{ textAlign: "center", color: "var(--dm)", padding: 40 }}>
@@ -3229,7 +3229,7 @@ function JudgePortal(p) {
         background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 12,
         cursor: "pointer", textAlign: "left", marginBottom: 8, color: "var(--tx)"
       }}>
-        <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "Anton" }}>{e.name}</div>
+        <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "Epilogue" }}>{e.name}</div>
         <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{e.players.length + " breakers · " + e.nj + " judge seats"}</div>
       </button>;
     })}
@@ -3241,8 +3241,8 @@ function JudgePortal(p) {
     padding: 24, maxWidth: 460, margin: "0 auto"
   })}>
     <AppHead />
-    <h1 style={{ fontFamily: "Anton", fontSize: 24, color: "var(--jd)", textAlign: "center", paddingTop: 28 }}>Judge Portal</h1>
-    <div style={{ textAlign: "center", fontSize: 15, fontFamily: "Anton", color: "var(--gd)", marginBottom: 20 }}>{ev.name}</div>
+    <h1 style={{ fontFamily: "Epilogue", fontSize: 24, color: "var(--jd)", textAlign: "center", paddingTop: 28 }}>Judge Portal</h1>
+    <div style={{ textAlign: "center", fontSize: 15, fontFamily: "Epilogue", color: "var(--gd)", marginBottom: 20 }}>{ev.name}</div>
     <Crd><Lbl>Your Name</Lbl><Inp value={ni} onChange={setNi} placeholder="DJ Flame..." /></Crd>
     <Lbl>Seat</Lbl>
     {Array.from({ length: ev.nj }).map(function (_, i) {
@@ -3261,7 +3261,7 @@ function JudgePortal(p) {
           fontSize: 22, fontWeight: 900, fontFamily: "JetBrains Mono",
           color: tk ? "var(--dm)" : "var(--jd)"
         }}>{i + 1}</span>
-        <div style={{ flex: 1, fontSize: 14, fontWeight: 700, fontFamily: "Anton" }}>{tk || ("Seat " + (i + 1))}</div>
+        <div style={{ flex: 1, fontSize: 14, fontWeight: 700, fontFamily: "Epilogue" }}>{tk || ("Seat " + (i + 1))}</div>
       </button>;
     })}
     <Btn v="gh" onClick={function () { setSid(null) }} sx={{ width: "100%", marginTop: 12 }}>← Events</Btn>
@@ -3295,7 +3295,7 @@ function JudgePortal(p) {
     padding: "18px 16px", maxWidth: 520, margin: "0 auto"
   })}>
     <AppHead />
-    <div style={{ fontSize: 14, fontFamily: "Anton", color: "var(--jd)", marginBottom: 12 }}>
+    <div style={{ fontSize: 14, fontFamily: "Epilogue", color: "var(--jd)", marginBottom: 12 }}>
       {"Scoring as " + name + " · " + ev.name}
     </div>
 
@@ -3312,7 +3312,7 @@ function JudgePortal(p) {
         var myAvg = myCount > 0 ? (mySum / myCount) : 0;
         return <Crd key={pl.id} sx={{ padding: "14px 16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{pl.name}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
             <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "JetBrains Mono", color: myAvg >= 7 ? "var(--gd)" : "var(--tx)" }}>{myAvg.toFixed(1)}</div>
           </div>
           {Array.from({ length: _rounds }).map(function (_, ri) {
@@ -3343,9 +3343,9 @@ function JudgePortal(p) {
           <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{"BO" + targetR}</div>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-          <div style={{ flex: 1, fontSize: 13, fontFamily: "Anton", color: "var(--rd)", fontWeight: 700 }}>{m.p1.name}</div>
+          <div style={{ flex: 1, fontSize: 13, fontFamily: "Epilogue", color: "var(--rd)", fontWeight: 700 }}>{m.p1.name}</div>
           <div style={{ fontSize: 12, fontFamily: "JetBrains Mono", color: "var(--dm)" }}>{tally.redRounds + " - " + tally.blueRounds}</div>
-          <div style={{ flex: 1, fontSize: 13, fontFamily: "Anton", color: "var(--bl)", fontWeight: 700, textAlign: "right" }}>{m.p2.name}</div>
+          <div style={{ flex: 1, fontSize: 13, fontFamily: "Epilogue", color: "var(--bl)", fontWeight: 700, textAlign: "right" }}>{m.p2.name}</div>
         </div>
         {list.map(function (rIdx) {
           var rd = (m.rounds || [])[rIdx] || { votes: {} };
@@ -3394,7 +3394,7 @@ function JudgePortal(p) {
         background: "var(--c2)", border: "1px solid var(--jd)", borderRadius: 14,
         padding: 22, maxWidth: 360, width: "100%"
       }}>
-        <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "Anton", color: "var(--jd)", marginBottom: 14 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "Epilogue", color: "var(--jd)", marginBottom: 14 }}>
           Judge Shortcuts
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3464,7 +3464,7 @@ function SignInModal(p) {
       background: "var(--c1)", border: "2px solid var(--b1)", borderRadius: 14,
       maxWidth: 420, width: "100%", padding: 24, animation: "fu .25s ease"
     }}>
-      <h2 style={{ fontFamily: "Anton", fontSize: 22, color: "var(--tx)", marginBottom: 6 }}>{title}</h2>
+      <h2 style={{ fontFamily: "Epilogue", fontSize: 22, color: "var(--tx)", marginBottom: 6 }}>{title}</h2>
       <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 16 }}>{sub}</div>
       {mode === "signup" && <div style={{ marginBottom: 10 }}>
         <Lbl>Display Name</Lbl>
@@ -3580,7 +3580,7 @@ function AccountPanel(p) {
               else if (!isCrew) p.onSelectProfile(entity.id);
             }} style={{
               flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none",
-              cursor: entity ? "pointer" : "default", padding: 0, color: "var(--tx)", fontFamily: "Anton", fontWeight: 700, fontSize: 14
+              cursor: entity ? "pointer" : "default", padding: 0, color: "var(--tx)", fontFamily: "Epilogue", fontWeight: 700, fontSize: 14
             }}>
               {entityName}
             </button>
@@ -3687,7 +3687,7 @@ function AudienceCrewDetail(p) {
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
         <Av name={cr.name} sz={72} />
         <div style={{ flex: 1 }}>
-          <h1 style={{ fontFamily: "Anton", fontSize: 30, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <h1 style={{ fontFamily: "Epilogue", fontSize: 30, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {cr.name}
             {crewClaim && crewClaim.status === "approved" && <Tag c="var(--gn)" bg="var(--c2)">🛡️ MANAGED</Tag>}
             {memberClaim && memberClaim.status === "approved" && <Tag c="var(--jd)" bg="var(--c2)">✓ MEMBER</Tag>}
@@ -3715,7 +3715,7 @@ function AudienceCrewDetail(p) {
               marginBottom: 5, cursor: "pointer", color: "var(--tx)"
             }}>
               <Av name={pr.breakingName} sz={28} />
-              <span style={{ flex: 1, fontFamily: "Anton", fontSize: 14, fontWeight: 700, textAlign: "left" }}>{pr.breakingName}</span>
+              <span style={{ flex: 1, fontFamily: "Epilogue", fontSize: 14, fontWeight: 700, textAlign: "left" }}>{pr.breakingName}</span>
             </button>;
           })}
           {visitors.length > 0 && <>
@@ -3727,7 +3727,7 @@ function AudienceCrewDetail(p) {
                 marginBottom: 4, cursor: "pointer", color: "var(--tx)", opacity: .85
               }}>
                 <Av name={pr.breakingName} sz={24} />
-                <span style={{ flex: 1, fontFamily: "Anton", fontSize: 13, textAlign: "left" }}>{pr.breakingName}</span>
+                <span style={{ flex: 1, fontFamily: "Epilogue", fontSize: 13, textAlign: "left" }}>{pr.breakingName}</span>
               </button>;
             })}
           </>}
@@ -3840,7 +3840,7 @@ function MyScoresPanel(p) {
         padding: "12px 14px", marginBottom: 10
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <div style={{ flex: 1, fontSize: 15, fontFamily: "Anton", color: "var(--tx)", fontWeight: 700 }}>{e.ev.name}</div>
+          <div style={{ flex: 1, fontSize: 15, fontFamily: "Epilogue", color: "var(--tx)", fontWeight: 700 }}>{e.ev.name}</div>
           <Tag c={revealed ? "var(--gn)" : "var(--dm)"} bg="var(--c2)">{revealed ? "REVEALED" : "AGGREGATE"}</Tag>
         </div>
         <div style={{ display: "flex", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
@@ -3888,7 +3888,7 @@ function MyScoresPanel(p) {
               fontSize: 12
             }}>
               <span style={{ minWidth: 56, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{getRN(e.ev.bracket, m.ri)}</span>
-              <span style={{ flex: 1, fontFamily: "Anton", color: "var(--tx)" }}>vs {m.opp.name}</span>
+              <span style={{ flex: 1, fontFamily: "Epilogue", color: "var(--tx)" }}>vs {m.opp.name}</span>
               <span style={{ fontFamily: "JetBrains Mono", color: m.side === "red" ? "var(--rd)" : "var(--bl)", fontWeight: 700 }}>
                 {m.side === "red" ? m.tally.redRounds : m.tally.blueRounds}
                 {" - "}
@@ -3946,7 +3946,7 @@ function AudienceProfileDetail(p) {
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
         <Av name={pr.breakingName} sz={72} />
         <div style={{ flex: 1 }}>
-          <h1 style={{ fontFamily: "Anton", fontSize: 30, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <h1 style={{ fontFamily: "Epilogue", fontSize: 30, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {pr.breakingName}
             {claim && claim.status === "approved" && <span title="Verified" style={{ fontSize: 18 }}>🛡️</span>}
           </h1>
@@ -3974,8 +3974,8 @@ function AudienceProfileDetail(p) {
       {(bio || ig || tt) && <Crd>
         {bio && <div style={{ fontSize: 13, color: "var(--tx)", marginBottom: 8, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{bio}</div>}
         {(ig || tt) && <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {ig && <a href={ig.indexOf("http") === 0 ? ig : "https://instagram.com/" + ig.replace(/^@/, "")} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "var(--cr)", textDecoration: "none", fontFamily: "Anton" }}>📷 {ig}</a>}
-          {tt && <a href={tt.indexOf("http") === 0 ? tt : "https://tiktok.com/@" + tt.replace(/^@/, "")} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "var(--bl)", textDecoration: "none", fontFamily: "Anton" }}>🎵 {tt}</a>}
+          {ig && <a href={ig.indexOf("http") === 0 ? ig : "https://instagram.com/" + ig.replace(/^@/, "")} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "var(--cr)", textDecoration: "none", fontFamily: "Epilogue" }}>📷 {ig}</a>}
+          {tt && <a href={tt.indexOf("http") === 0 ? tt : "https://tiktok.com/@" + tt.replace(/^@/, "")} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "var(--bl)", textDecoration: "none", fontFamily: "Epilogue" }}>🎵 {tt}</a>}
         </div>}
       </Crd>}
 
@@ -4008,7 +4008,7 @@ function AudienceProfileDetail(p) {
             display: "flex", justifyContent: "space-between", alignItems: "center",
             padding: "8px 0", borderBottom: i < placements.length - 1 ? "1px solid var(--b2)" : "none"
           }}>
-            <span style={{ fontSize: 14, fontFamily: "Anton", color: "var(--tx)" }}>{pl.ev}</span>
+            <span style={{ fontSize: 14, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.ev}</span>
             <Tag c="var(--gd)" bg="var(--gd2)">{PLACE_LABEL[pl.place] || ("#" + pl.place)}</Tag>
           </div>;
         })}
@@ -4268,7 +4268,7 @@ function AudienceView(p) {
     var unseen = unseenInboxCount();
     var headerStrip = (function () {
       return <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <h1 style={{ fontFamily: "Anton", fontSize: 28, color: "var(--tx)" }}>{tab === "events" ? "Live Events" : tab === "dancers" ? "Dancers" : tab === "watchlist" ? "Watchlist" : "Account"}</h1>
+        <h1 style={{ fontFamily: "Epilogue", fontSize: 28, color: "var(--tx)" }}>{tab === "events" ? "Live Events" : tab === "dancers" ? "Dancers" : tab === "watchlist" ? "Watchlist" : "Account"}</h1>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {me && <button onClick={function () { setTab("account"); markInboxSeen(); }} title="Notifications" style={{
             position: "relative", padding: "6px 10px", background: "var(--c1)", border: "1px solid var(--b1)",
@@ -4285,10 +4285,10 @@ function AudienceView(p) {
           {myProfile && <button onClick={function () { setSelPid(myProfile.id); }} title="View your dancer profile" style={{
             display: "flex", alignItems: "center", gap: 6, padding: "5px 10px 5px 6px",
             background: "var(--gd2)", border: "1px solid var(--gd)", borderRadius: 20,
-            cursor: "pointer", fontFamily: "Anton", fontSize: 12, fontWeight: 700, color: "var(--gd)"
+            cursor: "pointer", fontFamily: "Epilogue", fontSize: 12, fontWeight: 700, color: "var(--gd)"
           }}>
             <Av name={myProfile.breakingName} sz={22} />
-            <span style={{ fontSize: 11, fontFamily: "Anton" }}>{myProfile.breakingName}</span>
+            <span style={{ fontSize: 11, fontFamily: "Epilogue" }}>{myProfile.breakingName}</span>
             <span style={{ fontSize: 11 }}>🛡️</span>
           </button>}
           {me ? <>
@@ -4353,7 +4353,7 @@ function AudienceView(p) {
                     width: 8, height: 8, borderRadius: "50%", background: "var(--rd)",
                     animation: "pulse 1.4s infinite", display: "inline-block"
                   }} />
-                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "Anton" }}>{e.name}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "Epilogue" }}>{e.name}</div>
                 </div>
                 <div style={{ display: "flex", gap: 10, fontSize: 12, color: "var(--ac)", flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700 }}>{btDef.l || e.type}</span>
@@ -4387,7 +4387,7 @@ function AudienceView(p) {
                 cursor: "pointer", padding: 0, fontFamily: "inherit"
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ fontSize: 19, fontWeight: 700, fontFamily: "Anton" }}>{e.name}</div>
+                  <div style={{ fontSize: 19, fontWeight: 700, fontFamily: "Epilogue" }}>{e.name}</div>
                   <StatusBadge status={status} />
                 </div>
                 <div style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 12, color: "var(--dm)", flexWrap: "wrap" }}>
@@ -4444,7 +4444,7 @@ function AudienceView(p) {
             }}>
               <Av name={pr.breakingName} sz={36} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "Anton", display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "Epilogue", display: "flex", gap: 6, alignItems: "center" }}>
                   {pr.breakingName}
                   {claim && claim.status === "approved" && <span title="You are this dancer" style={{ fontSize: 12 }}>🛡️</span>}
                   {claim && claim.status === "pending" && <span title="Claim pending admin review" style={{ fontSize: 10, color: "var(--gd)", fontFamily: "JetBrains Mono" }}>⏳ PENDING</span>}
@@ -4478,7 +4478,7 @@ function AudienceView(p) {
                 flex: 1, textAlign: "left", background: "transparent", border: "none", color: "var(--tx)",
                 cursor: "pointer", padding: 0, fontFamily: "inherit"
               }}>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "Anton" }}>{e.name}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "Epilogue" }}>{e.name}</div>
                 <div style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 12, color: "var(--dm)", flexWrap: "wrap" }}>
                   <span>{btDef.l || e.type}</span>
                   {e.dt && <span>{fmtD(e.dt)}</span>}
@@ -4525,7 +4525,7 @@ function AudienceView(p) {
     }}>✕</button>
     <div style={{ maxWidth: 880, margin: "0 auto", textAlign: "center" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontFamily: "Anton", fontSize: 44, color: "var(--tx)" }}>{ev.name}</h1>
+        <h1 style={{ fontFamily: "Epilogue", fontSize: 44, color: "var(--tx)" }}>{ev.name}</h1>
         <StatusBadge status={eventStatus(ev)} />
       </div>
       <button onClick={function () {
@@ -4536,7 +4536,7 @@ function AudienceView(p) {
       }}>📋 Copy share link</button>
       {((ev.djs || []).length > 0 || (ev.mcs || []).length > 0) && <div style={{
         display: "flex", gap: 18, justifyContent: "center", flexWrap: "wrap",
-        marginTop: 8, fontSize: 16, fontFamily: "Anton", letterSpacing: ".02em"
+        marginTop: 8, fontSize: 16, fontFamily: "Epilogue", letterSpacing: ".02em"
       }}>
         {(ev.djs || []).length > 0 && <span style={{ color: "var(--jd)" }}>
           <span style={{ marginRight: 6 }}>🎵</span>{ev.djs.join(" · ")}
@@ -4579,7 +4579,7 @@ function AudienceView(p) {
               background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, marginBottom: 6
             }}>
               <span style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", minWidth: 70 }}>{getRN(ev.bracket, m.ri)}</span>
-              <span style={{ flex: 1, fontFamily: "Anton", fontSize: 15, color: "var(--gd)", fontWeight: 700 }}>
+              <span style={{ flex: 1, fontFamily: "Epilogue", fontSize: 15, color: "var(--gd)", fontWeight: 700 }}>
                 {m.winner.name}
                 <span style={{ color: "var(--dm)", fontWeight: 400, fontSize: 12 }}> beat </span>
                 <span style={{ color: "var(--tx)", fontWeight: 400 }}>{loser.name}</span>
@@ -4592,7 +4592,7 @@ function AudienceView(p) {
         </div>;
       })()}
 
-      <h2 style={{ fontFamily: "Anton", fontSize: 24, color: "var(--ac)", marginTop: 24, marginBottom: 20 }}>Preliminaries</h2>
+      <h2 style={{ fontFamily: "Epilogue", fontSize: 24, color: "var(--ac)", marginTop: 24, marginBottom: 20 }}>Preliminaries</h2>
       <div style={{
         display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))",
         gap: 10, textAlign: "left"
@@ -4609,7 +4609,7 @@ function AudienceView(p) {
               color: i === 0 ? "var(--gd)" : i < 3 ? "var(--ac)" : "var(--dm)", minWidth: 30
             }}>{"#" + (i + 1)}</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{pl.name}</div>
+              <div style={{ fontSize: 17, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
             </div>
             <div style={{
               fontSize: 22, fontWeight: 900, fontFamily: "JetBrains Mono",
@@ -4715,7 +4715,7 @@ function DraftMode(p) {
     {/* Draft pool manager — only before draft starts */}
     {draftNotStarted && <Crd>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "Anton", color: "var(--ac)" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "Epilogue", color: "var(--ac)" }}>
           {"Pool: " + pool.length + " / " + poolSize + " breakers"}
         </div>
         <Btn v="gh" onClick={function () { setManagePool(!managePool) }} sx={{ fontSize: 10, padding: "4px 8px" }}>
@@ -4736,7 +4736,7 @@ function DraftMode(p) {
                 return d;
               });
             }} style={{
-              padding: "4px 8px", fontSize: 11, fontFamily: "Anton", fontWeight: 700,
+              padding: "4px 8px", fontSize: 11, fontFamily: "Epilogue", fontWeight: 700,
               background: isCap ? "var(--gd2)" : "var(--c2)",
               border: "1px solid " + (isCap ? "var(--gd)" : "var(--b1)"),
               color: isCap ? "var(--gd)" : "var(--tx)", borderRadius: 5, cursor: "pointer"
@@ -4759,7 +4759,7 @@ function DraftMode(p) {
                   return d;
                 });
               }} style={{
-                padding: "4px 8px", fontSize: 11, fontFamily: "Anton", fontWeight: 700,
+                padding: "4px 8px", fontSize: 11, fontFamily: "Epilogue", fontWeight: 700,
                 background: "transparent", border: "1px dashed var(--b1)",
                 color: "var(--dm)", borderRadius: 5, cursor: "pointer"
               }}>
@@ -4777,7 +4777,7 @@ function DraftMode(p) {
     {/* Snake order visualization */}
     <Crd>
       <div style={{ textAlign: "center", marginBottom: 12 }}>
-        <h3 style={{ fontFamily: "Anton", fontSize: 20, color: "var(--ac)" }}>{teamSize + "v" + teamSize + " Snake Draft"}</h3>
+        <h3 style={{ fontFamily: "Epilogue", fontSize: 20, color: "var(--ac)" }}>{teamSize + "v" + teamSize + " Snake Draft"}</h3>
         <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 3 }}>{"8 teams · " + poolSize + " breakers · Top 8 seeds are captains"}</div>
       </div>
 
@@ -4806,7 +4806,7 @@ function DraftMode(p) {
         marginTop: 14, border: "2px solid var(--ac)"
       }}>
         <div style={{ fontSize: 10, color: "var(--ac)", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em" }}>Now Picking</div>
-        <div style={{ fontSize: 18, fontFamily: "Anton", color: "var(--tx)", marginTop: 4 }}>
+        <div style={{ fontSize: 18, fontFamily: "Epilogue", color: "var(--tx)", marginTop: 4 }}>
           {"Team #" + current.pick + " · " + current.captain.name}
           <span style={{ fontSize: 13, color: "var(--dm)", marginLeft: 8 }}>
             {current.members.length + "/" + teamSize + " filled"}
@@ -4819,7 +4819,7 @@ function DraftMode(p) {
         marginTop: 14, border: "2px solid var(--gd)", textAlign: "center",
         animation: "gw 2s infinite"
       }}>
-        <div style={{ fontSize: 18, fontFamily: "Anton", color: "var(--gd)" }}>🏆 Draft Complete!</div>
+        <div style={{ fontSize: 18, fontFamily: "Epilogue", color: "var(--gd)" }}>🏆 Draft Complete!</div>
         <div style={{ fontSize: 11, color: "var(--gd)", opacity: .7, marginTop: 4 }}>Teams auto-saved to event</div>
       </div>)}
     </Crd>
@@ -4832,7 +4832,7 @@ function DraftMode(p) {
           return (<button key={pl.id} onClick={function () { pick(pl) }} style={{
             display: "flex", alignItems: "center", gap: 6, padding: "8px 12px",
             background: "var(--c2)", border: "1px solid var(--b1)", borderRadius: 8,
-            cursor: "pointer", fontSize: 13, fontFamily: "Anton", color: "var(--tx)",
+            cursor: "pointer", fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)",
             transition: "all .15s"
           }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--ac)"; e.currentTarget.style.background = "var(--ac2)"; }}
@@ -4859,7 +4859,7 @@ function DraftMode(p) {
           }}>
             <span style={{ color: "var(--dm)", minWidth: 40 }}>{"R" + entry.round}</span>
             <span style={{ color: "var(--ac)", minWidth: 60, fontWeight: 700 }}>{"#" + entry.teamPick}</span>
-            <span style={{ color: "var(--tx)", fontFamily: "Anton", flex: 1 }}>
+            <span style={{ color: "var(--tx)", fontFamily: "Epilogue", flex: 1 }}>
               {entry.teamCaptain + " → " + entry.player}
               <span style={{ color: "var(--dm)", marginLeft: 6 }}>{"(#" + entry.seed + ")"}</span>
             </span>
@@ -4891,7 +4891,7 @@ function DraftMode(p) {
             return (<div key={m.id} style={{
               display: "flex", alignItems: "center", gap: 6,
               fontSize: 12, color: mi === 0 ? "var(--gd)" : "var(--tx)",
-              padding: "3px 0", fontFamily: "Anton",
+              padding: "3px 0", fontFamily: "Epilogue",
               borderBottom: mi < t.members.length - 1 ? "1px solid var(--b2)" : "none"
             }}>
               <span style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", minWidth: 18 }}>{"#" + m.seed}</span>
@@ -4928,7 +4928,7 @@ function ModeShell(p) {
   return (<div>
     <Crd sx={{ background: p.heroBg, border: p.heroBorder }}>
       <div style={{ textAlign: "center" }}>
-        <h3 style={{ fontFamily: "Anton", fontSize: 22, color: p.heroColor }}>{p.title}</h3>
+        <h3 style={{ fontFamily: "Epilogue", fontSize: 22, color: p.heroColor }}>{p.title}</h3>
         <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 4 }}>{p.subtitle}</div>
       </div>
     </Crd>
@@ -5059,7 +5059,7 @@ function SevenSmokeMode(p) {
 
   var winnerContent = st.done && st.winner ? (<>
     <div style={{ fontSize: 11, color: "var(--gd)", letterSpacing: ".2em", fontWeight: 800 }}>★ 7-TO-SMOKE CHAMPION ★</div>
-    <div style={{ fontSize: 26, fontFamily: "Anton", color: "var(--gd)", marginTop: 6 }}>{st.winner.name}</div>
+    <div style={{ fontSize: 26, fontFamily: "Epilogue", color: "var(--gd)", marginTop: 6 }}>{st.winner.name}</div>
     <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 4 }}>{(st.points[st.winner.id] || 0) + " points"}</div>
   </>) : null;
 
@@ -5086,7 +5086,7 @@ function SevenSmokeMode(p) {
         </div>
       </div>
       {st.timerRunning && remaining === 0 && !st.done && (<div style={{ marginTop: 12, padding: 12, background: "var(--rd2)", border: "2px solid var(--rd)", borderRadius: 10 }}>
-        <div style={{ fontSize: 14, fontFamily: "Anton", color: "var(--rd)", textAlign: "center", marginBottom: 8 }}>⏱ Time's up!</div>
+        <div style={{ fontSize: 14, fontFamily: "Epilogue", color: "var(--rd)", textAlign: "center", marginBottom: 8 }}>⏱ Time's up!</div>
         <div style={{ fontSize: 12, color: "var(--dm)", textAlign: "center", marginBottom: 8 }}>Highest-point breaker wins.</div>
         <Btn v="gd" onClick={function () { endGame(leaderboard[0], "TIME"); }} sx={{ width: "100%", fontSize: 12 }}>Award win to {leaderboard[0].name}</Btn>
       </div>)}
@@ -5097,12 +5097,12 @@ function SevenSmokeMode(p) {
       <div style={{ display: "flex", gap: 10, alignItems: "stretch", marginBottom: 14 }}>
         <div style={{ flex: 1, background: "var(--gd2)", border: "2px solid var(--gd)", borderRadius: 10, padding: 14, textAlign: "center" }}>
           <div style={{ fontSize: 10, color: "var(--gd)", fontWeight: 800, letterSpacing: ".15em" }}>👑 KING</div>
-          <div style={{ fontSize: 18, fontFamily: "Anton", color: "var(--tx)", marginTop: 6 }}>{st.king.name}</div>
+          <div style={{ fontSize: 18, fontFamily: "Epilogue", color: "var(--tx)", marginTop: 6 }}>{st.king.name}</div>
           <div style={{ fontSize: 26, fontFamily: "JetBrains Mono", fontWeight: 900, color: "var(--gd)", marginTop: 4 }}>{st.points[st.king.id] || 0}</div>
         </div>
         <div style={{ flex: 1, background: "var(--ac2)", border: "2px solid var(--ac)", borderRadius: 10, padding: 14, textAlign: "center" }}>
           <div style={{ fontSize: 10, color: "var(--ac)", fontWeight: 800, letterSpacing: ".15em" }}>⚔ CHALLENGER</div>
-          <div style={{ fontSize: 18, fontFamily: "Anton", color: "var(--tx)", marginTop: 6 }}>{st.queue[0].name}</div>
+          <div style={{ fontSize: 18, fontFamily: "Epilogue", color: "var(--tx)", marginTop: 6 }}>{st.queue[0].name}</div>
           <div style={{ fontSize: 26, fontFamily: "JetBrains Mono", fontWeight: 900, color: "var(--ac)", marginTop: 4 }}>{st.points[st.queue[0].id] || 0}</div>
         </div>
       </div>
@@ -5121,7 +5121,7 @@ function SevenSmokeMode(p) {
           borderBottom: i < leaderboard.length - 1 ? "1px solid var(--b2)" : "none"
         }}>
           <span style={{ fontSize: 14, fontWeight: 900, fontFamily: "JetBrains Mono", color: i === 0 ? "var(--gd)" : "var(--dm)", minWidth: 26 }}>{"#" + (i + 1)}</span>
-          <div style={{ flex: 1, fontSize: 14, fontFamily: "Anton", color: "var(--tx)" }}>{pl.name}</div>
+          <div style={{ flex: 1, fontSize: 14, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
           <span style={{ fontSize: 16, fontFamily: "JetBrains Mono", fontWeight: 800, color: pl.pts >= TARGET ? "var(--gd)" : "var(--tx)" }}>{pl.pts}</span>
         </div>;
       })}
@@ -5135,7 +5135,7 @@ function SevenSmokeMode(p) {
           return <span key={pl.id} style={{
             fontSize: 11, padding: "4px 8px", borderRadius: 5,
             background: i === 0 ? "var(--ac2)" : "var(--c2)", color: i === 0 ? "var(--ac)" : "var(--dm)",
-            fontFamily: "Anton", fontWeight: 700
+            fontFamily: "Epilogue", fontWeight: 700
           }}>{(i === 0 ? "▶ " : "") + pl.name}</span>;
         })}
       </div>
@@ -5221,7 +5221,7 @@ function SolitaireMode(p) {
 
   var winnerContent = st.champion ? (<>
     <div style={{ fontSize: 11, color: "var(--gd)", letterSpacing: ".2em", fontWeight: 800 }}>★ SOLITAIRE CHAMPION ★</div>
-    <div style={{ fontSize: 26, fontFamily: "Anton", color: "var(--gd)", marginTop: 6 }}>{st.champion.name}</div>
+    <div style={{ fontSize: 26, fontFamily: "Epilogue", color: "var(--gd)", marginTop: 6 }}>{st.champion.name}</div>
   </>) : null;
 
   return (<ModeShell
@@ -5236,7 +5236,7 @@ function SolitaireMode(p) {
       var title = roundSize === N ? "Round 1" : (roundSize <= 2 ? "Final" : ("Round " + (ri + 1) + " · " + roundSize + " breakers"));
       return <Crd key={ri}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <div style={{ fontSize: 13, fontFamily: "Anton", color: "var(--ac)", fontWeight: 800 }}>{title}</div>
+          <div style={{ fontSize: 13, fontFamily: "Epilogue", color: "var(--ac)", fontWeight: 800 }}>{title}</div>
           <Btn v="gh" onClick={function () { reshuffle(ri) }} sx={{ fontSize: 10, padding: "4px 8px" }}>Reshuffle</Btn>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -5254,7 +5254,7 @@ function SolitaireMode(p) {
                 {"TEAM " + t.side + (captainName ? " (" + captainName + ")" : "") + (won ? " ★" : "")}
               </div>
               {t.team.map(function (m) {
-                return <div key={m.id} style={{ fontSize: 13, fontFamily: "Anton", color: "var(--tx)", padding: "3px 0" }}>{m.name}</div>;
+                return <div key={m.id} style={{ fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)", padding: "3px 0" }}>{m.name}</div>;
               })}
             </div>;
           })}
@@ -5365,7 +5365,7 @@ function CaptureMode(p) {
   var winnerContent = st.finalWinner ? (<>
     <div style={{ fontSize: 11, color: "var(--gd)", letterSpacing: ".2em", fontWeight: 800 }}>★ CAPTURE CHAMPIONS ★</div>
     <div style={{ fontSize: 14, fontFamily: "JetBrains Mono", color: "var(--dm)", marginTop: 6 }}>{st.finalWinner.members.length + "-member winning crew"}</div>
-    <div style={{ fontSize: 18, fontFamily: "Anton", color: "var(--gd)", marginTop: 6 }}>
+    <div style={{ fontSize: 18, fontFamily: "Epilogue", color: "var(--gd)", marginTop: 6 }}>
       {st.finalWinner.members.map(function (m) { return m.name }).join(" · ")}
     </div>
   </>) : null;
@@ -5381,7 +5381,7 @@ function CaptureMode(p) {
 
     {st.stages.map(function (stage, stIdx) {
       return <Crd key={stIdx}>
-        <div style={{ fontSize: 12, fontWeight: 800, fontFamily: "Anton", color: "var(--ac)", marginBottom: 10, letterSpacing: ".1em" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, fontFamily: "Epilogue", color: "var(--ac)", marginBottom: 10, letterSpacing: ".1em" }}>
           {"STAGE " + (stIdx + 1) + " · " + stage.size + "v" + stage.size}
         </div>
         {stage.matches.map(function (m, mIdx) {
@@ -5407,7 +5407,7 @@ function CaptureMode(p) {
                     {(won ? "★ " : "") + "CREW " + x.side}
                   </div>
                   {(x.crew ? x.crew.members : []).map(function (mm) {
-                    return <div key={mm.id} style={{ fontSize: 12, fontFamily: "Anton", color: "var(--tx)", padding: "2px 0" }}>{mm.name}</div>;
+                    return <div key={mm.id} style={{ fontSize: 12, fontFamily: "Epilogue", color: "var(--tx)", padding: "2px 0" }}>{mm.name}</div>;
                   })}
                 </div>;
               })}
@@ -5423,7 +5423,7 @@ function CaptureMode(p) {
                   return <button key={lb.id} onClick={function () { captureBreaker(stIdx, mIdx, lb) }} style={{
                     padding: "6px 10px", background: "var(--ac2)", color: "var(--ac)",
                     border: "1px solid var(--ac)", borderRadius: 6, cursor: "pointer",
-                    fontSize: 12, fontFamily: "Anton", fontWeight: 700
+                    fontSize: 12, fontFamily: "Epilogue", fontWeight: 700
                   }}>{"+ " + lb.name}</button>;
                 })}
               </div>
@@ -5502,10 +5502,10 @@ function LmsMode(p) {
 
   var winnerContent = st.winner ? (<>
     <div style={{ fontSize: 11, color: "var(--gd)", letterSpacing: ".2em", fontWeight: 800 }}>★ LMS CHAMPIONS ★</div>
-    <div style={{ fontSize: 20, fontFamily: "Anton", color: "var(--gd)", marginTop: 6 }}>
+    <div style={{ fontSize: 20, fontFamily: "Epilogue", color: "var(--gd)", marginTop: 6 }}>
       {(st.winner === "A" ? st.crewA.name : st.crewB.name)}
     </div>
-    <div style={{ fontSize: 13, fontFamily: "Anton", color: "var(--dm)", marginTop: 6 }}>
+    <div style={{ fontSize: 13, fontFamily: "Epilogue", color: "var(--dm)", marginTop: 6 }}>
       {(st.winner === "A" ? aAlive : bAlive).map(function (m) { return m.name }).join(" · ")}
     </div>
   </>) : null;
@@ -5534,7 +5534,7 @@ function LmsMode(p) {
             {x.crew.members.map(function (m) {
               var isOut = x.crew.eliminated.some(function (e) { return e.id === m.id });
               return <div key={m.id} style={{
-                fontSize: 13, fontFamily: "Anton", color: isOut ? "var(--dm)" : "var(--tx)",
+                fontSize: 13, fontFamily: "Epilogue", color: isOut ? "var(--dm)" : "var(--tx)",
                 padding: "3px 0", textDecoration: isOut ? "line-through" : "none",
                 opacity: isOut ? .5 : 1
               }}>{m.name}{isOut && " ✕"}</div>;
@@ -5592,7 +5592,7 @@ function SettingsView(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onBack} />
-    <h2 style={{ fontFamily: "Anton", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>Settings</h2>
+    <h2 style={{ fontFamily: "Epilogue", fontSize: 24, color: "var(--tx)", marginBottom: 16 }}>Settings</h2>
     <Crd>
       <Lbl>Admin PIN</Lbl>
       <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 8 }}>Required to enter Administrator mode. Leave blank for no PIN.</div>
@@ -5630,7 +5630,7 @@ function SettingsView(p) {
               if (f) importBackup(f);
             }} />
           <div style={{
-            padding: "12px 20px", borderRadius: 10, fontSize: 15, fontWeight: 700, fontFamily: "Anton",
+            padding: "12px 20px", borderRadius: 10, fontSize: 15, fontWeight: 700, fontFamily: "Epilogue",
             letterSpacing: ".06em", textTransform: "uppercase", textAlign: "center",
             background: "var(--jd2)", color: "var(--jd)", border: "2px solid var(--jd)"
           }}>⬆ Import Backup</div>
@@ -5657,7 +5657,7 @@ function SettingsView(p) {
         var cities = p.cityDB[country] || [];
         if (cities.length === 0) return null;
         return <div key={country} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ac)", marginBottom: 6, fontFamily: "Anton", letterSpacing: ".05em" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ac)", marginBottom: 6, fontFamily: "Epilogue", letterSpacing: ".05em" }}>
             {country}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -5668,7 +5668,7 @@ function SettingsView(p) {
                 display: "flex", alignItems: "center", gap: 6, padding: "6px 10px",
                 background: inUse ? "var(--c2)" : "var(--rd2)",
                 border: "1px solid " + (inUse ? "var(--b1)" : "var(--rd)"),
-                borderRadius: 8, fontSize: 12, fontFamily: "Anton"
+                borderRadius: 8, fontSize: 12, fontFamily: "Epilogue"
               }}>
                 <span style={{ color: "var(--tx)" }}>{ct}</span>
                 <button onClick={function () {
@@ -5797,7 +5797,7 @@ function DatabaseView(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onBack} />
-    <h2 style={{ fontFamily: "Anton", fontSize: 24, color: "var(--tx)", marginBottom: 14 }}>Breaker Database</h2>
+    <h2 style={{ fontFamily: "Epilogue", fontSize: 24, color: "var(--tx)", marginBottom: 14 }}>Breaker Database</h2>
 
     <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
       <Inp value={dbS} onChange={setDbS} placeholder="Search breakers..." style={{ flex: 1 }} />
@@ -5858,7 +5858,7 @@ function DatabaseView(p) {
             {grp.crew && <Av name={grp.crew.name} sz={28} isCrew />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{
-                fontFamily: "Anton", fontWeight: 800, fontSize: 14,
+                fontFamily: "Epilogue", fontWeight: 800, fontSize: 14,
                 letterSpacing: 0.5, textTransform: "uppercase",
                 color: isUnaff ? "var(--dm)" : "var(--cr)",
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
@@ -5922,7 +5922,7 @@ function DatabaseView(p) {
                 }} />
                 <span style={{
                   flex: 1, minWidth: 0,
-                  fontSize: 13, fontFamily: "Anton", fontWeight: 600, color: "var(--tx)",
+                  fontSize: 13, fontFamily: "Epilogue", fontWeight: 600, color: "var(--tx)",
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
                 }}>{pr.breakingName || "—"}</span>
                 {isActive(pr) && <span title="Active in scene" style={{
@@ -6071,7 +6071,7 @@ function MatchScorer(p) {
 
   return (<Crd sx={{ marginTop: 14, border: "2px solid var(--ac)", background: "var(--c1)" }}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "Anton", color: "var(--ac)" }}>
+      <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "Epilogue", color: "var(--ac)" }}>
         {"🎤 " + getRN(ev.bracket, ri) + " · Match " + (mi + 1)}
       </div>
       <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--dm)", cursor: "pointer", fontSize: 16 }}>✕</button>
@@ -6080,12 +6080,12 @@ function MatchScorer(p) {
     <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
       <div style={{ flex: 1, padding: "10px 12px", background: "var(--rd)" + "1a", borderRadius: 8, border: "1px solid var(--rd)" }}>
         <div style={{ fontSize: 9, color: "var(--rd)", fontFamily: "JetBrains Mono", fontWeight: 800, letterSpacing: ".2em" }}>RED</div>
-        <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)", marginTop: 2 }}>{match.p1.name}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)", marginTop: 2 }}>{match.p1.name}</div>
         <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "JetBrains Mono", color: "var(--rd)", marginTop: 4 }}>{tally.redRounds}</div>
       </div>
       <div style={{ flex: 1, padding: "10px 12px", background: "var(--bl)" + "1a", borderRadius: 8, border: "1px solid var(--bl)" }}>
         <div style={{ fontSize: 9, color: "var(--bl)", fontFamily: "JetBrains Mono", fontWeight: 800, letterSpacing: ".2em", textAlign: "right" }}>BLUE</div>
-        <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)", marginTop: 2, textAlign: "right" }}>{match.p2.name}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)", marginTop: 2, textAlign: "right" }}>{match.p2.name}</div>
         <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "JetBrains Mono", color: "var(--bl)", marginTop: 4, textAlign: "right" }}>{tally.blueRounds}</div>
       </div>
     </div>
@@ -6141,7 +6141,7 @@ function MatchScorer(p) {
       background: "var(--gd2)", border: "1px solid var(--gd)"
     }}>
       <div style={{ fontSize: 10, color: "var(--gd)", fontWeight: 800, letterSpacing: ".18em" }}>★ WINNER ★</div>
-      <div style={{ fontSize: 16, fontFamily: "Anton", color: "var(--gd)", fontWeight: 800 }}>
+      <div style={{ fontSize: 16, fontFamily: "Epilogue", color: "var(--gd)", fontWeight: 800 }}>
         {(tally.winner === "red" ? match.p1 : match.p2).name}
       </div>
     </div>}
@@ -6199,7 +6199,7 @@ function JudgeInvites(p) {
         background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8, marginBottom: 4
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontFamily: "Anton", color: "var(--tx)", fontWeight: 700 }}>
+          <div style={{ fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)", fontWeight: 700 }}>
             {g.judgeName || g.judgeEmail.split("@")[0]}
           </div>
           <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{g.judgeEmail}</div>
@@ -6296,7 +6296,7 @@ function EventAnalytics(p) {
       padding: "14px 12px", textAlign: "center", animation: "fu .3s ease"
     }}>
       <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".15em", marginBottom: 6 }}>{props.label}</div>
-      <div style={{ fontSize: 32, fontFamily: "Anton", fontWeight: 700, color: props.color, lineHeight: 1 }}>{props.value}</div>
+      <div style={{ fontSize: 32, fontFamily: "Epilogue", fontWeight: 700, color: props.color, lineHeight: 1 }}>{props.value}</div>
       {props.sub && <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 4 }}>{props.sub}</div>}
     </div>;
   }
@@ -6322,7 +6322,7 @@ function EventAnalytics(p) {
           var colors = { 0: "var(--gd)", 1: "var(--dm)", 2: "var(--cr)" };
           return <div key={idx} style={{ flex: 1, maxWidth: 130, textAlign: "center" }}>
             <Av name={pl.name} sz={36} />
-            <div style={{ fontSize: 12, fontFamily: "Anton", fontWeight: 700, color: "var(--tx)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.name}</div>
+            <div style={{ fontSize: 12, fontFamily: "Epilogue", fontWeight: 700, color: "var(--tx)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.name}</div>
             <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{pl.avg.toFixed(2)}</div>
             <div style={{
               marginTop: 6, height: heights[idx], background: colors[idx], borderRadius: "6px 6px 0 0",
@@ -6349,7 +6349,7 @@ function EventAnalytics(p) {
           <text x="60" y="76" textAnchor="middle" fontSize="9" fill="var(--dm)" fontFamily="JetBrains Mono" letterSpacing="2">DECIDED</text>
         </svg>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 22, fontFamily: "Anton", fontWeight: 700, color: "var(--tx)" }}>{bracketDecided} <span style={{ color: "var(--dm)", fontWeight: 400 }}>/ {bracketMatches}</span></div>
+          <div style={{ fontSize: 22, fontFamily: "Epilogue", fontWeight: 700, color: "var(--tx)" }}>{bracketDecided} <span style={{ color: "var(--dm)", fontWeight: 400 }}>/ {bracketMatches}</span></div>
           <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em", marginTop: 2 }}>MATCHES DECIDED</div>
           <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 8 }}>
             {bracketDecided === bracketMatches ? "🏁 Bracket complete." :
@@ -6367,7 +6367,7 @@ function EventAnalytics(p) {
         {crewList.map(function (c, i) {
           var pct = Math.round((c.count / maxCrew) * 100);
           return <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-            <div style={{ width: 110, fontSize: 13, fontFamily: "Anton", color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+            <div style={{ width: 110, fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
             <div style={{ flex: 1, background: "var(--c2)", borderRadius: 4, height: 18, position: "relative", overflow: "hidden" }}>
               <div style={{
                 width: pct + "%",
@@ -6378,7 +6378,7 @@ function EventAnalytics(p) {
                 animation: "fu .5s ease"
               }} />
             </div>
-            <div style={{ width: 36, textAlign: "right", fontSize: 14, fontFamily: "Anton", fontWeight: 700, color: "var(--tx)" }}>{c.count}</div>
+            <div style={{ width: 36, textAlign: "right", fontSize: 14, fontFamily: "Epilogue", fontWeight: 700, color: "var(--tx)" }}>{c.count}</div>
           </div>;
         })}
       </div>
@@ -6395,7 +6395,7 @@ function EventAnalytics(p) {
           var h = binMax > 0 ? (c / binMax) * 100 : 0;
           var colors = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
           return <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
-            <div style={{ fontSize: 12, color: c > 0 ? "var(--tx)" : "var(--dm)", fontFamily: "Anton", fontWeight: 700 }}>{c}</div>
+            <div style={{ fontSize: 12, color: c > 0 ? "var(--tx)" : "var(--dm)", fontFamily: "Epilogue", fontWeight: 700 }}>{c}</div>
             <div style={{
               width: "100%",
               height: h + "%",
@@ -6428,7 +6428,7 @@ function EventAnalytics(p) {
           var diff = jj.avg - consensusAvg;
           var diffColor = Math.abs(diff) < 0.3 ? "var(--gn)" : Math.abs(diff) < 0.7 ? "var(--gd)" : "var(--cr)";
           return <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-            <div style={{ width: 108, fontSize: 13, fontFamily: "Anton", color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jj.name}</div>
+            <div style={{ width: 108, fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jj.name}</div>
             <div style={{ flex: 1, background: "var(--c2)", borderRadius: 4, height: 18, position: "relative", overflow: "hidden" }}>
               <div style={{
                 width: pct + "%",
@@ -6528,7 +6528,7 @@ function EventDetailView(p) {
 
   return (<div style={{ animation: "fu .3s ease" }}>
     <Back onClick={p.onBack} />
-    <h1 style={{ fontFamily: "Anton", fontSize: 26, color: "var(--tx)", marginBottom: 4 }}>{ev.name}</h1>
+    <h1 style={{ fontFamily: "Epilogue", fontSize: 26, color: "var(--tx)", marginBottom: 4 }}>{ev.name}</h1>
     {(function () {
       var btDef = BTYPES.find(function (b2) { return b2.id === ev.type; }) || {};
       return <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
@@ -6541,7 +6541,7 @@ function EventDetailView(p) {
 
     {((ev.djs || []).length > 0 || (ev.mcs || []).length > 0) && <div style={{
       display: "flex", gap: 14, marginBottom: 10, flexWrap: "wrap",
-      fontSize: 12, fontFamily: "Anton"
+      fontSize: 12, fontFamily: "Epilogue"
     }}>
       {(ev.djs || []).length > 0 && <span style={{ color: "var(--jd)" }}>
         <span style={{ marginRight: 5 }}>🎵</span>{ev.djs.join(" · ")}
@@ -6595,7 +6595,7 @@ function EventDetailView(p) {
       textAlign: "center", animation: "gw 2.5s infinite"
     }}>
       <div style={{ fontSize: 11, color: "var(--gd)", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".2em" }}>★ Champion ★</div>
-      <div style={{ fontSize: 30, fontFamily: "Anton", color: "var(--gd)", marginTop: 4 }}>{champ.name}</div>
+      <div style={{ fontSize: 30, fontFamily: "Epilogue", color: "var(--gd)", marginTop: 4 }}>{champ.name}</div>
     </div>}
 
     {(function () {
@@ -6656,7 +6656,7 @@ function EventDetailView(p) {
             background: "var(--ac2)", borderRadius: 5, padding: "2px 6px"
           }}>{"#" + (pl.sn || (i + 1))}</span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{pl.name}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
             {pl.crew && <div style={{ fontSize: 11, color: "var(--dm)" }}>{pl.crew}</div>}
           </div>
           {pl.pid && <Tag c="var(--jd)" bg="var(--jd2)">DB</Tag>}
@@ -6712,7 +6712,7 @@ function EventDetailView(p) {
             <span style={{ fontSize: 12, fontWeight: 800, color: "var(--cr)", fontFamily: "JetBrains Mono", background: "var(--cr2)", borderRadius: 5, padding: "2px 6px" }}>{"#" + (pl.sn || (i + 1))}</span>
             <Av name={pl.name} sz={28} isCrew />
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{pl.name}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
               {pl.kind === "crew" && pl.members && <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{pl.members.map(function (m) { return m.name }).join(", ")}</div>}
               {pl.temporary && <Tag c="var(--dm)" bg="var(--c2)">temporary</Tag>}
             </div>
@@ -6746,7 +6746,7 @@ function EventDetailView(p) {
               fontSize: 15, fontWeight: 900, fontFamily: "JetBrains Mono",
               color: i === 0 ? "var(--gd)" : i < 3 ? "var(--ac)" : "var(--dm)", minWidth: 28
             }}>{"#" + (i + 1)}</span>
-            <div style={{ flex: 1, fontSize: 15, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{pl.name}</div>
+            <div style={{ flex: 1, fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
             <span style={{
               fontSize: 18, fontWeight: 800, fontFamily: "JetBrains Mono",
               color: pl.avg >= 7 ? "var(--gd)" : "var(--tx)"
@@ -6760,7 +6760,7 @@ function EventDetailView(p) {
         var avg = computeEntryAvg(sc, ev.nj, _rounds);
         return <Crd key={pl.id}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)" }}>{pl.name}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{pl.name}</div>
             <div style={{
               fontSize: 20, fontWeight: 900, fontFamily: "JetBrains Mono",
               color: avg >= 7 ? "var(--gd)" : "var(--tx)"
@@ -6887,7 +6887,7 @@ function EventDetailView(p) {
 
     <Crd sx={{ marginTop: 18, border: "1px solid " + (ev.scoresRevealed ? "var(--gn)" : "var(--b1)") }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "Anton", color: ev.scoresRevealed ? "var(--gn)" : "var(--tx)" }}>
+        <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "Epilogue", color: ev.scoresRevealed ? "var(--gn)" : "var(--tx)" }}>
           🎯 Score Transparency
         </div>
         <Tag c={ev.scoresRevealed ? "var(--gn)" : "var(--dm)"} bg="var(--c2)">
@@ -6906,7 +6906,7 @@ function EventDetailView(p) {
 
     <Crd sx={{ marginTop: 18, border: "1px solid var(--gd)", background: "var(--gd2)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "Anton", color: "var(--gd)" }}>👑 Cypher King</div>
+        <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "Epilogue", color: "var(--gd)" }}>👑 Cypher King</div>
         <Tag c="var(--gd)" bg="var(--c2)">{"+" + CYPHER_KING_BONUS + " DPR"}</Tag>
       </div>
       <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10 }}>
@@ -7058,7 +7058,7 @@ function SeedingTab(p) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {ambiguousTie.map(function (e) {
           return <span key={e.pl.id} style={{
-            padding: "4px 10px", fontSize: 12, fontFamily: "Anton", fontWeight: 700,
+            padding: "4px 10px", fontSize: 12, fontFamily: "Epilogue", fontWeight: 700,
             background: "var(--c2)", border: "1px solid var(--gd)", borderRadius: 6, color: "var(--gd)"
           }}>{"#" + (e.rank + 1) + " " + e.pl.name}</span>;
         })}
@@ -7087,9 +7087,9 @@ function SeedingTab(p) {
                 {"⋮⋮"}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)",
+                <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pl.name}</div>
-                {pl.crew && <div style={{ fontSize: 10, color: "var(--cr)", fontFamily: "Anton" }}>{pl.crew}</div>}
+                {pl.crew && <div style={{ fontSize: 10, color: "var(--cr)", fontFamily: "Epilogue" }}>{pl.crew}</div>}
               </div>
               <span style={{ fontSize: 12, fontWeight: 800, color: pl.avg >= 7 ? "var(--gd)" : "var(--tx)", fontFamily: "JetBrains Mono" }}>
                 {pl.avg.toFixed(1)}
@@ -7125,9 +7125,9 @@ function SeedingTab(p) {
               }}>{"#" + (i + 1)}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {pl ? <>
-                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "Anton", color: "var(--tx)",
+                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pl.name}</div>
-                  {pl.crew && <div style={{ fontSize: 10, color: "var(--cr)", fontFamily: "Anton" }}>{pl.crew}</div>}
+                  {pl.crew && <div style={{ fontSize: 10, color: "var(--cr)", fontFamily: "Epilogue" }}>{pl.crew}</div>}
                 </> : <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic" }}>— drop breaker here —</div>}
               </div>
               {pl && <span style={{ fontSize: 11, fontWeight: 700, color: pl.avg >= 7 ? "var(--gd)" : "var(--dm)", fontFamily: "JetBrains Mono" }}>
@@ -7157,12 +7157,12 @@ function SeedingTab(p) {
               borderRadius: 8, opacity: both ? 1 : .6
             }}>
               <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginBottom: 4 }}>{"MATCH " + n}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: "Anton" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: "Epilogue" }}>
                 <span style={{ fontSize: 10, fontWeight: 800, color: "var(--ac)", fontFamily: "JetBrains Mono", minWidth: 24 }}>{"#" + (i + 1)}</span>
                 <span style={{ color: a ? "var(--tx)" : "var(--dm)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a ? a.name : "— TBD —"}</span>
               </div>
               <div style={{ fontSize: 10, color: "var(--dm)", margin: "2px 0 2px 30px" }}>vs</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: "Anton" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: "Epilogue" }}>
                 <span style={{ fontSize: 10, fontWeight: 800, color: "var(--ac)", fontFamily: "JetBrains Mono", minWidth: 24 }}>{"#" + (i + 2)}</span>
                 <span style={{ color: b ? "var(--tx)" : "var(--dm)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b ? b.name : "— TBD —"}</span>
               </div>
@@ -7220,7 +7220,7 @@ function PastEventsArchive(p) {
         }}>
           <button onClick={function () { p.onOpen(e.id); }} style={{
             flex: 1, textAlign: "left", background: "transparent", border: "none",
-            color: "var(--dm)", cursor: "pointer", padding: 0, fontFamily: "Anton", fontSize: 13, fontWeight: 600,
+            color: "var(--dm)", cursor: "pointer", padding: 0, fontFamily: "Epilogue", fontSize: 13, fontWeight: 600,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
           }}>{e.name}</button>
           <Btn v="gh" onClick={function () { p.onDuplicate(e); }} sx={{ fontSize: 9, padding: "3px 6px" }}>Duplicate</Btn>
@@ -7261,7 +7261,7 @@ function ClaimsInbox(p) {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontFamily: "Anton", color: "var(--tx)", fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontFamily: "Epilogue", color: "var(--tx)", fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <Tag c={kindColor} bg="var(--c2)">{kindLabel}</Tag>
               {c.userEmail} <span style={{ color: "var(--dm)", fontWeight: 400 }}>claims</span> {entityName}
               {isGuardian && <Tag c="var(--gd)" bg="var(--gd2)">👨‍👧 GUARDIAN</Tag>}
@@ -7464,8 +7464,8 @@ function Admin(p) {
     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24, alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
       <div>
         <h1 style={{
-          fontFamily: "Anton, Impact, sans-serif", fontSize: 44, lineHeight: 1,
-          color: "var(--tx)", letterSpacing: "-.01em", fontWeight: 400, textTransform: "uppercase"
+          fontFamily: "Anton, Impact, sans-serif", fontSize: 40, lineHeight: 1,
+          color: "var(--tx)", letterSpacing: "-.005em", fontWeight: 400, textTransform: "uppercase"
         }}>CYPHER NET</h1>
         <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 6, fontFamily: "JetBrains Mono", letterSpacing: ".18em" }}>
           MASTER CONTROL
@@ -7507,7 +7507,7 @@ function Admin(p) {
           fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)",
           minWidth: 46, textAlign: "left", fontWeight: 700, letterSpacing: ".04em"
         }}>{dStr}</span>}
-        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, fontFamily: "Anton", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, fontFamily: "Epilogue", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>
         {fmt && <span style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", fontWeight: 700 }}>{fmt}</span>}
         <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{e.players.length}</span>
         {hasChamp && <span style={{ fontSize: 11, color: "var(--gd)" }}>🏆</span>}
@@ -7523,7 +7523,7 @@ function Admin(p) {
       }}>
         <button onClick={function () { setEditExt(ext); setView("extEdit"); }}
           style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", color: "var(--tx)", minWidth: 0 }}>
-          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, fontFamily: "Anton", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ext.name}</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, fontFamily: "Epilogue", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ext.name}</span>
           <span style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--cr)", fontWeight: 700 }}>EXT</span>
           <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{(ext.entries || []).length}</span>
           {ext.special && <span style={{ fontSize: 11, color: "var(--gd)" }}>★</span>}
@@ -7607,7 +7607,7 @@ function RoleGate(p) {
   })}>
     <AppHead />
     <div style={{ maxWidth: 360, width: "100%", textAlign: "center" }}>
-      <h2 style={{ fontFamily: "Anton", fontSize: 28, color: "var(--tx)", marginBottom: 6 }}>Enter PIN</h2>
+      <h2 style={{ fontFamily: "Epilogue", fontSize: 28, color: "var(--tx)", marginBottom: 6 }}>Enter PIN</h2>
       <p style={{ color: "var(--dm)", fontSize: 13, marginBottom: 24 }}>
         {target === "admin" ? "Administrator access" : "Judge access"}
       </p>
@@ -7798,7 +7798,7 @@ export default function App() {
     display: "flex", alignItems: "center", justifyContent: "center"
   })}>
     <AppHead />
-    <div style={{ color: "var(--dm)", fontFamily: "Anton", fontSize: 18 }}>Loading…</div>
+    <div style={{ color: "var(--dm)", fontFamily: "Epilogue", fontSize: 18 }}>Loading…</div>
   </div>;
 
   // Embed mode short-circuits RoleGate + role views entirely.
