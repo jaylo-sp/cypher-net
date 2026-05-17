@@ -2584,9 +2584,17 @@ function FastEventCreator(p) {
   var todayIso = new Date().toISOString().slice(0, 10);
   var _dt = useState(todayIso), dt = _dt[0], setDt = _dt[1];
   var _level = useState("local"), level = _level[0], setLevel = _level[1];
+  var _loc = useState("local"), locality = _loc[0], setLocality = _loc[1];  // "local" | "out"
+  var _city = useState("Vancouver"), city = _city[0], setCity = _city[1];
 
   function launch() {
     var tpl = TEMPLATES.find(function (x) { return x.id === tplId; }) || TEMPLATES[0];
+    var isLocal = locality === "local";
+    var details = isLocal ? {
+      city: city.trim() || "Vancouver",
+      state: "BC",
+      country: "Canada"
+    } : {};
     var ev = {
       id: "ev" + Date.now(),
       name: (name && name.trim()) || tpl.l,
@@ -2604,7 +2612,7 @@ function FastEventCreator(p) {
       nr: 0,
       roundsPerStage: { r16: 1, r8: 3, r4: 3, r2: 3, final: 5 },
       djs: [], mcs: [], volunteers: [], organizers: [],
-      details: {}
+      details: details
     };
     p.onSave(ev);
   }
@@ -2639,6 +2647,29 @@ function FastEventCreator(p) {
           </button>;
         })}
       </div>
+
+      <Lbl>Locality</Lbl>
+      <div style={{ display: "flex", gap: 8, marginBottom: locality === "local" ? 6 : 12 }}>
+        <button onClick={function () { setLocality("local"); }} style={{
+          flex: 1, padding: "12px 14px",
+          border: "2px solid " + (locality === "local" ? "var(--gd)" : "var(--b1)"),
+          background: locality === "local" ? "var(--gd2)" : "transparent",
+          color: locality === "local" ? "var(--gd)" : "var(--dm)",
+          borderRadius: 10, fontFamily: "Epilogue", fontWeight: 800, fontSize: 13,
+          letterSpacing: ".05em", textTransform: "uppercase", cursor: "pointer"
+        }}>🏙 Local Scene</button>
+        <button onClick={function () { setLocality("out"); }} style={{
+          flex: 1, padding: "12px 14px",
+          border: "2px solid " + (locality === "out" ? "var(--gd)" : "var(--b1)"),
+          background: locality === "out" ? "var(--gd2)" : "transparent",
+          color: locality === "out" ? "var(--gd)" : "var(--dm)",
+          borderRadius: 10, fontFamily: "Epilogue", fontWeight: 800, fontSize: 13,
+          letterSpacing: ".05em", textTransform: "uppercase", cursor: "pointer"
+        }}>✈️ Out of Town</button>
+      </div>
+      {locality === "local" && <div style={{ marginBottom: 12 }}>
+        <Inp value={city} onChange={setCity} placeholder="City (default: Vancouver)" />
+      </div>}
 
       <Lbl>Event Name (optional)</Lbl>
       <Inp value={name} onChange={setName} placeholder="e.g. Summer Jam Cypher 2026" />
@@ -2701,6 +2732,12 @@ function EventForm(p) {
   var _pr = useState(ev && ev.rounds ? ev.rounds : 2), prelimRounds = _pr[0], setPrelimRounds = _pr[1];
   var _djIn = useState(""), djIn = _djIn[0], setDjIn = _djIn[1];
   var _mcIn = useState(""), mcIn = _mcIn[0], setMcIn = _mcIn[1];
+  // Advanced section: Prizes (entry fee, prize pool). Hidden by default; auto-opens when editing
+  // an event that already has any prize data filled in.
+  var _showAdv = useState(function () {
+    if (!ev || !ev.details) return false;
+    return !!(ev.details.entryFee || ev.details.prizePool);
+  }), showAdv = _showAdv[0], setShowAdv = _showAdv[1];
 
   // Snap bracket size when format changes — some formats only allow specific sizes.
   useEffect(function () {
@@ -3023,7 +3060,7 @@ function EventForm(p) {
       </div>
     </Crd>
 
-    {EVENT_FIELDS.map(function (sec) {
+    {EVENT_FIELDS.filter(function (sec) { return sec.section !== "Prizes"; }).map(function (sec) {
       var filled = sec.fields.filter(function (f) { return (details[f.key] || "").toString().trim() }).length;
       var isVenue = sec.section === "Venue";
       return (<Crd key={sec.section}>
@@ -3046,6 +3083,36 @@ function EventForm(p) {
         })}
       </Crd>);
     })}
+
+    {/* Advanced fields: Prizes section + future extras */}
+    {(function () {
+      var prizes = EVENT_FIELDS.find(function (s) { return s.section === "Prizes"; });
+      if (!prizes) return null;
+      return <Crd>
+        <button onClick={function () { setShowAdv(!showAdv); }} style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          background: "transparent", border: "none", cursor: "pointer", padding: 0,
+          fontFamily: "JetBrains Mono", color: "var(--dm)", fontSize: 11, letterSpacing: ".15em",
+          fontWeight: 700, textTransform: "uppercase"
+        }}>
+          <span>{showAdv ? "▼" : "▶"} Advanced (Prizes)</span>
+          <span style={{ fontSize: 10 }}>{showAdv ? "Hide" : "Show"}</span>
+        </button>
+        {showAdv && <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "var(--ac)", fontWeight: 800, fontFamily: "JetBrains Mono", letterSpacing: ".12em" }}>
+              {prizes.icon + " " + prizes.section.toUpperCase()}
+            </div>
+          </div>
+          {prizes.fields.map(function (f) {
+            return <div key={f.key} style={{ marginBottom: 12 }}>
+              <Lbl>{f.label}</Lbl>
+              {renderField(f)}
+            </div>;
+          })}
+        </div>}
+      </Crd>;
+    })()}
     </>}
 
     <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
