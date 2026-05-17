@@ -2568,10 +2568,16 @@ function CrewEditor(p) {
 // ── Fast Event Creator: 2-tap quick-launch with preset templates ──
 function FastEventCreator(p) {
   var TEMPLATES = [
-    { id: "solo", l: "1v1 Pro Breaking", type: "solo", size: 16, nj: 3, desc: "Solo bracket · 16 dancers · 3 judges" },
-    { id: "2v2", l: "2v2 Championship", type: "2v2", size: 16, nj: 3, desc: "2v2 fixed-team bracket · 3 judges" },
-    { id: "3v3", l: "3v3 Championship", type: "3v3", size: 8, nj: 3, desc: "3v3 fixed-team bracket · 8 entries" },
-    { id: "crew", l: "Crew vs Crew", type: "crew", size: 8, nj: 3, desc: "Crew battle · 8 crews · 3 judges" }
+    { id: "solo", l: "1v1 Breaking", emoji: "🕺", type: "solo", size: 16, nj: 3, desc: "Solo bracket · 16 · 3 judges" },
+    { id: "bgirl", l: "1v1 BGirl", emoji: "💃", type: "solo", size: 8, nj: 3, desc: "BGirl-focused solo · 8 · 3 judges" },
+    { id: "youth", l: "1v1 Youth", emoji: "🧒", type: "solo", size: 8, nj: 3, desc: "Youth solo · 8 · 3 judges" },
+    { id: "2v2", l: "2v2 Championship", emoji: "👯", type: "2v2", size: 16, nj: 3, desc: "2v2 fixed-team · 3 judges" },
+    { id: "3v3", l: "3v3 Championship", emoji: "🔥", type: "3v3", size: 8, nj: 3, desc: "3v3 fixed-team · 3 judges" },
+    { id: "4v4", l: "4v4 Championship", emoji: "⚔️", type: "4v4", size: 8, nj: 3, desc: "4v4 fixed-team · 3 judges" },
+    { id: "crew", l: "Crew vs Crew", emoji: "🏴", type: "crew", size: 8, nj: 3, desc: "Pre-formed crews · 8 · 3 judges" },
+    { id: "draft", l: "Snake Draft 3v3", emoji: "🎯", type: "draft3", size: 8, nj: 3, desc: "Captains draft from pool · 3v3" },
+    { id: "7smoke", l: "7 to Smoke", emoji: "💨", type: "7smoke", size: 8, nj: 3, desc: "First to 7 wins · belt event" },
+    { id: "capture", l: "Capture the Breaker", emoji: "🪤", type: "capture3", size: 8, nj: 3, desc: "Winners capture loser's best" }
   ];
   var _tpl = useState("solo"), tplId = _tpl[0], setTplId = _tpl[1];
   var _name = useState(""), name = _name[0], setName = _name[1];
@@ -2614,18 +2620,22 @@ function FastEventCreator(p) {
 
     <Crd>
       <Lbl>Format Template</Lbl>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 14 }}>
         {TEMPLATES.map(function (t) {
           var active = tplId === t.id;
           return <button key={t.id} onClick={function () { setTplId(t.id); }} style={{
-            padding: "12px 14px", textAlign: "left",
+            padding: "10px 12px", textAlign: "left",
             border: "2px solid " + (active ? "var(--gd)" : "var(--b1)"),
             background: active ? "var(--gd2)" : "var(--c1)",
             color: "var(--tx)", cursor: "pointer", borderRadius: 10,
-            transition: "border-color .15s, background .15s"
+            transition: "border-color .15s, background .15s",
+            display: "flex", flexDirection: "column", gap: 2, minHeight: 70
           }}>
-            <div style={{ fontFamily: "Epilogue", fontWeight: 800, fontSize: 14, color: active ? "var(--gd)" : "var(--tx)" }}>{t.l}</div>
-            <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 4, fontFamily: "JetBrains Mono" }}>{t.desc}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>{t.emoji}</span>
+              <span style={{ fontFamily: "Epilogue", fontWeight: 800, fontSize: 13, color: active ? "var(--gd)" : "var(--tx)" }}>{t.l}</span>
+            </div>
+            <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 2, fontFamily: "JetBrains Mono", lineHeight: 1.3 }}>{t.desc}</div>
           </button>;
         })}
       </div>
