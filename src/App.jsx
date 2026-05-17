@@ -2151,6 +2151,7 @@ function SegmentedToggle(p) {
 }
 
 // ── Editorial rank badge: gradient + glow for podium, italic text for the rest ──
+// Podium chips use Syncopate (tracked-out display caps) so #1 pops cleanly on mobile.
 function RankBadge(p) {
   var n = p.rank;
   if (n === 1 || n === 2 || n === 3) {
@@ -2169,14 +2170,14 @@ function RankBadge(p) {
       display: "inline-flex", alignItems: "center", justifyContent: "center",
       padding: p.compact ? "3px 8px" : "4px 10px",
       fontSize: p.compact ? 11 : 12,
-      fontWeight: 900, fontFamily: "JetBrains Mono",
-      background: gradient, color: color, letterSpacing: ".02em",
+      fontWeight: 700, fontFamily: "Syncopate, JetBrains Mono, monospace",
+      background: gradient, color: color, letterSpacing: ".14em", textTransform: "uppercase",
       borderRadius: 4, flexShrink: 0, lineHeight: 1.4,
-      textAlign: "center", minWidth: p.compact ? 28 : 32,
+      textAlign: "center", minWidth: p.compact ? 32 : 36,
       boxShadow: glow, textShadow: n === 1 ? "0 1px 1px rgba(0,0,0,.15)" : "none"
     }}>#{n}</span>;
   }
-  // Italic plain text for the rest
+  // Italic plain text for the rest — keep Epilogue for the looser italic feel
   return <span style={{
     display: "inline-block",
     fontSize: p.compact ? 16 : 18,
@@ -3664,7 +3665,10 @@ function LeaderboardDashboard(p) {
 
 // Posts the widget's current document height to the parent frame so Squarespace
 // (or any embedder that listens for { type: "CYPHER_EMBED_HEIGHT" }) can shrink-wrap the iframe.
-function useEmbedHeight() {
+// Accepts a deps array — pass [list.length] so the height refreshes whenever the
+// rendered row count changes (load-more, search, mode toggle, etc.).
+function useEmbedHeight(deps) {
+  // ResizeObserver setup runs once; tear-down on unmount
   useEffect(function () {
     if (typeof window === "undefined" || window.self === window.top) return;
     var post = function () {
@@ -3691,10 +3695,25 @@ function useEmbedHeight() {
       clearInterval(iv);
     };
   }, []);
+
+  // Eager post on dep changes — the ResizeObserver eventually catches up, but a
+  // synchronous postMessage on list.length change keeps the iframe snug instantly.
+  useEffect(function () {
+    if (typeof window === "undefined" || window.self === window.top) return;
+    var t = setTimeout(function () {
+      try {
+        var h = Math.max(
+          document.documentElement.scrollHeight,
+          document.body ? document.body.scrollHeight : 0
+        );
+        window.parent.postMessage({ type: "CYPHER_EMBED_HEIGHT", height: h }, "*");
+      } catch (e) {}
+    }, 50); // tiny delay so animation-driven layout settles first
+    return function () { clearTimeout(t); };
+  }, deps || []);
 }
 
 function LeaderboardEmbed(p) {
-  useEmbedHeight();
   var cfg = p.config;
   // Local state mirrors the embed's interactive chips. Initial values come from URL params (cfg).
   var _md = useState((cfg.mode === "breakers") ? "players" : cfg.mode), mode = _md[0], setMode = _md[1];
@@ -3730,52 +3749,54 @@ function LeaderboardEmbed(p) {
     return Object.keys(map).map(function (k) { return map[k]; });
   }, [filteredEvents]);
 
-  var base;
-  if (mode === "players") {
-    base = (stats.pR || []).filter(function (x) {
-      if (!(x.dpr > 0 || x.eventsAttended > 0)) return false;
-      if (cfg.country !== "All" && x.country !== cfg.country) return false;
-      return true;
-    });
-  } else if (mode === "crews") {
-    base = (stats.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
-  } else if (mode === "kings") {
-    base = (stats.pR || []).filter(function (x) { return (x.cypherKings || 0) > 0; });
-  } else if (mode === "judges") {
-    base = judgesR.filter(function (x) { return x.events > 0; });
-  } else if (mode === "cities") {
-    base = (stats.cityR || []).filter(function (x) {
-      if (!(x.dpr > 0 || x.events > 0)) return false;
-      if (cfg.country !== "All" && !(x.name || "").endsWith(", " + cfg.country)) return false;
-      return true;
-    });
-  } else if (mode === "states") {
-    base = (stats.stateR || []).filter(function (x) {
-      if (!(x.dpr > 0 || x.events > 0)) return false;
-      if (cfg.country !== "All" && !(x.name || "").endsWith(", " + cfg.country)) return false;
-      return true;
-    });
-  } else if (mode === "countries") {
-    base = (stats.countryR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
-  } else {
-    base = [];
-  }
-
-  // Search
-  if (qSel && qSel.trim()) {
-    var qlc = qSel.toLowerCase().trim();
-    base = base.filter(function (u) {
-      return matchesSearch(u, qlc);
-    });
-  }
-
+  // Engine: memoized base + filter + sort, so chip changes don't rebuild the world
   var sort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : cfg.sort);
-  var sortFn = makeSorter(sort);
-  var fullSorted = (base || []).slice().sort(sortFn);
+  var fullSorted = useMemo(function () {
+    var base;
+    if (mode === "players") {
+      base = (stats.pR || []).filter(function (x) {
+        if (!(x.dpr > 0 || x.eventsAttended > 0)) return false;
+        if (cfg.country !== "All" && x.country !== cfg.country) return false;
+        return true;
+      });
+    } else if (mode === "crews") {
+      base = (stats.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
+    } else if (mode === "kings") {
+      base = (stats.pR || []).filter(function (x) { return (x.cypherKings || 0) > 0; });
+    } else if (mode === "judges") {
+      base = judgesR.filter(function (x) { return x.events > 0; });
+    } else if (mode === "cities") {
+      base = (stats.cityR || []).filter(function (x) {
+        if (!(x.dpr > 0 || x.events > 0)) return false;
+        if (cfg.country !== "All" && !(x.name || "").endsWith(", " + cfg.country)) return false;
+        return true;
+      });
+    } else if (mode === "states") {
+      base = (stats.stateR || []).filter(function (x) {
+        if (!(x.dpr > 0 || x.events > 0)) return false;
+        if (cfg.country !== "All" && !(x.name || "").endsWith(", " + cfg.country)) return false;
+        return true;
+      });
+    } else if (mode === "countries") {
+      base = (stats.countryR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
+    } else {
+      base = [];
+    }
+    if (qSel && qSel.trim()) {
+      var qlc = qSel.toLowerCase().trim();
+      base = base.filter(function (u) { return matchesSearch(u, qlc); });
+    }
+    return base.slice().sort(makeSorter(sort));
+  }, [stats, judgesR, mode, sort, qSel, cfg.country]);
+
   var hardCap = cfg.limit || 100;
   var effectiveCount = Math.min(visibleCount, hardCap, fullSorted.length);
-  var list = fullSorted.slice(0, effectiveCount);
+  var list = useMemo(function () { return fullSorted.slice(0, effectiveCount); }, [fullSorted, effectiveCount]);
   var hasMore = effectiveCount < Math.min(fullSorted.length, hardCap);
+
+  // Broadcast iframe height to the parent whenever the visible row count shifts
+  // (Load More, mode/filter chip toggles, search) so Squarespace can re-fit the iframe.
+  useEmbedHeight([list.length, cfg.view]);
 
   var sortColors = {
     events: "var(--gd)", cypherKings: "var(--gd)", dpr: "var(--gd)", wins: "var(--ac)",
