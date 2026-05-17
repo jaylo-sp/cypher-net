@@ -9,3 +9,7 @@ dist
 .env
 .env.local
 .env.*.local
+.vercel
+
+# Generated locally with admin email substituted; do not commit
+supabase-schema-ready.sql
