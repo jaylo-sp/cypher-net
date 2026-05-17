@@ -43,7 +43,7 @@ create table if not exists public.profile_claims (
   user_email text not null,
   user_display_name text,
   profile_id text not null,
-  claim_kind text not null default 'dancer' check (claim_kind in ('dancer','crew_manager')),
+  claim_kind text not null default 'dancer' check (claim_kind in ('dancer','crew_manager','crew_member')),
   status text not null default 'pending' check (status in ('pending','approved','rejected')),
   message text,
   created_at timestamptz default now(),
@@ -51,8 +51,10 @@ create table if not exists public.profile_claims (
 );
 
 -- For existing databases: add the column if missing.
-alter table public.profile_claims add column if not exists claim_kind text not null default 'dancer'
-  check (claim_kind in ('dancer','crew_manager'));
+alter table public.profile_claims add column if not exists claim_kind text not null default 'dancer';
+alter table public.profile_claims drop constraint if exists profile_claims_claim_kind_check;
+alter table public.profile_claims add constraint profile_claims_claim_kind_check
+  check (claim_kind in ('dancer','crew_manager','crew_member'));
 
 create index if not exists profile_claims_user_idx on public.profile_claims (user_id);
 create index if not exists profile_claims_profile_idx on public.profile_claims (profile_id);

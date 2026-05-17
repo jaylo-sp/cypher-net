@@ -3058,21 +3058,33 @@ function AccountPanel(p) {
     <Crd>
       <Lbl>My Claims</Lbl>
       {sorted.length === 0 ? <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic" }}>
-        You haven't claimed any dancer profiles yet. Go to the Dancers tab and find yourself.
+        You haven't claimed anything yet. Tap a dancer or crew to claim it.
       </div> : sorted.map(function (c) {
-        var pr = (p.profiles || []).find(function (x) { return x.id === c.profileId; });
+        var kind = c.kind || "dancer";
+        var isCrew = kind === "crew_manager" || kind === "crew_member";
+        var entity = isCrew
+          ? (p.crews || []).find(function (x) { return x.id === c.profileId; })
+          : (p.profiles || []).find(function (x) { return x.id === c.profileId; });
+        var entityName = entity ? (isCrew ? entity.name : entity.breakingName) : (isCrew ? "(crew deleted)" : "(profile deleted)");
         var statusColor = c.status === "approved" ? "var(--gn)" : c.status === "rejected" ? "var(--rd)" : "var(--gd)";
         var isGuardian = (c.message || "").toUpperCase().startsWith("[GUARDIAN]");
+        var kindLabel = kind === "crew_manager" ? "MANAGER" : kind === "crew_member" ? "MEMBER" : "DANCER";
+        var kindColor = kind === "crew_manager" ? "var(--cr)" : kind === "crew_member" ? "var(--jd)" : "var(--ac)";
         return <div key={c.id} style={{
           background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8,
           padding: "10px 12px", marginBottom: 6
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <button onClick={function () { if (pr) p.onSelectProfile(pr.id); }} style={{
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+            <Tag c={kindColor} bg="var(--c2)">{kindLabel}</Tag>
+            <button onClick={function () {
+              if (!entity) return;
+              if (isCrew && p.onSelectCrew) p.onSelectCrew(entity.id);
+              else if (!isCrew) p.onSelectProfile(entity.id);
+            }} style={{
               flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none",
-              cursor: pr ? "pointer" : "default", padding: 0, color: "var(--tx)", fontFamily: "Oswald", fontWeight: 700, fontSize: 14
+              cursor: entity ? "pointer" : "default", padding: 0, color: "var(--tx)", fontFamily: "Oswald", fontWeight: 700, fontSize: 14
             }}>
-              {pr ? pr.breakingName : "(profile deleted)"}
+              {entityName}
             </button>
             <Tag c={statusColor} bg="var(--c2)">
               {c.status === "approved" ? (isGuardian ? "GUARDIAN ✓" : "VERIFIED ✓") : c.status === "pending" ? "PENDING" : "REJECTED"}
@@ -3160,7 +3172,9 @@ function OwnerEditPanel(p) {
 function AudienceCrewDetail(p) {
   var cr = p.crew;
   var _msg = useState(""), msg = _msg[0], setMsg = _msg[1];
+  var _mMsg = useState(""), mMsg = _mMsg[0], setMMsg = _mMsg[1];
   var crewClaim = (p.myClaims || []).find(function (c) { return c.kind === "crew_manager" && c.profileId === cr.id; });
+  var memberClaim = (p.myClaims || []).find(function (c) { return c.kind === "crew_member" && c.profileId === cr.id; });
   var members = (p.profiles || []).filter(function (pr) {
     return (pr.crews || []).some(function (c) { return c.id === cr.id; });
   });
@@ -3178,6 +3192,7 @@ function AudienceCrewDetail(p) {
           <h1 style={{ fontFamily: "Oswald", fontSize: 30, color: "var(--tx)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {cr.name}
             {crewClaim && crewClaim.status === "approved" && <Tag c="var(--gn)" bg="var(--c2)">🛡️ MANAGED</Tag>}
+            {memberClaim && memberClaim.status === "approved" && <Tag c="var(--jd)" bg="var(--c2)">✓ MEMBER</Tag>}
           </h1>
           <div style={{ fontSize: 13, color: "var(--dm)" }}>{cr.location || "—"}</div>
           {cr.desc && <div style={{ fontSize: 13, color: "var(--tx)", marginTop: 6 }}>{cr.desc}</div>}
@@ -3250,6 +3265,38 @@ function AudienceCrewDetail(p) {
         </div>}
         {p.me && crewClaim && crewClaim.status === "rejected" && <div style={{ fontSize: 13, color: "var(--rd)" }}>
           Claim rejected. Contact the organizer if you think this is a mistake.
+        </div>}
+      </Crd>
+
+      <Crd sx={{ marginTop: 10, borderColor: "var(--jd)", borderWidth: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <Lbl>I'm a member of this crew</Lbl>
+          {memberClaim && <Tag c={memberClaim.status === "approved" ? "var(--gn)" : memberClaim.status === "rejected" ? "var(--rd)" : "var(--gd)"} bg="var(--c2)">{memberClaim.status.toUpperCase()}</Tag>}
+        </div>
+        {!p.me && <div>
+          <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10 }}>
+            Sign in to mark yourself a member of <b>{cr.name}</b>. After admin review, you'll get a ✓ MEMBER badge — view-only, no edit rights.
+          </div>
+          <Btn v="jd" onClick={p.onSignIn} sx={{ width: "100%", fontSize: 13 }}>Sign In to Claim</Btn>
+        </div>}
+        {p.me && !memberClaim && <div>
+          <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 8 }}>
+            Lighter than a manager claim — just a public "I'm in this crew" badge for representation. Add a short note so the admin can confirm.
+          </div>
+          <TArea value={mMsg} onChange={setMMsg} placeholder="e.g., I've been rolling with them since 2023." rows={2} />
+          <Btn v="jd" onClick={function () { p.onMemberClaim(cr.id, mMsg); setMMsg(""); }} sx={{ width: "100%", fontSize: 13, marginTop: 8 }} disabled={!mMsg.trim()}>
+            Submit Member Claim
+          </Btn>
+        </div>}
+        {p.me && memberClaim && memberClaim.status === "pending" && <div style={{ fontSize: 12, color: "var(--dm)" }}>
+          Your membership claim is pending admin review.
+          {memberClaim.message && <div style={{ marginTop: 8, padding: 8, background: "var(--c2)", borderRadius: 6, fontStyle: "italic" }}>"{memberClaim.message}"</div>}
+        </div>}
+        {p.me && memberClaim && memberClaim.status === "approved" && <div style={{ fontSize: 13, color: "var(--gn)" }}>
+          ✓ Verified member of {cr.name}. Shown on your account.
+        </div>}
+        {p.me && memberClaim && memberClaim.status === "rejected" && <div style={{ fontSize: 13, color: "var(--rd)" }}>
+          Membership claim rejected. Contact the organizer if you think this is a mistake.
         </div>}
       </Crd>
     </div>
@@ -3627,6 +3674,7 @@ function AudienceView(p) {
     Promise.resolve(claimsQueue.add(c)).then(function () { reloadAudience(me.id); });
   }
   function submitCrewClaim(crewId, message) { submitClaim(crewId, message, "crew_manager"); }
+  function submitCrewMemberClaim(crewId, message) { submitClaim(crewId, message, "crew_member"); }
   function myClaim(profileId) {
     return myClaims.find(function (c) { return c.profileId === profileId && (c.kind || "dancer") === "dancer"; });
   }
@@ -3681,6 +3729,7 @@ function AudienceView(p) {
         onBack={function () { setSelCid(null); }}
         onSelectProfile={function (pid) { setSelCid(null); setSelPid(pid); }}
         onClaim={submitCrewClaim}
+        onMemberClaim={submitCrewMemberClaim}
         onSignIn={function () { setShowAuth(true); }} />
     </>;
   } else if (selProfile) {
@@ -3928,8 +3977,9 @@ function AudienceView(p) {
             <div style={{ marginBottom: 14 }}>Sign in to manage your account.</div>
             <Btn v="gn" onClick={function () { setShowAuth(true); }} sx={{ fontSize: 13 }}>Sign In or Create Account</Btn>
           </div>
-          : <AccountPanel me={me} profiles={p.profiles} myClaims={myClaims}
+          : <AccountPanel me={me} profiles={p.profiles} crews={p.crews} myClaims={myClaims}
               onSelectProfile={setSelPid}
+              onSelectCrew={setSelCid}
               onWithdraw={function (id) {
                 Promise.resolve(claimsQueue.remove(id)).then(function () { reloadAudience(me.id); });
               }}
@@ -5632,6 +5682,254 @@ function JudgeInvites(p) {
   </Crd>;
 }
 
+function EventAnalytics(p) {
+  var ev = p.ev;
+  var prelimRounds = getPrelimRounds(ev);
+
+  // Hero stats
+  var breakers = (ev.players || []).length;
+  var judges = ev.nj || 0;
+  var bracketMatches = 0, bracketDecided = 0;
+  (ev.bracket || []).forEach(function (rd) {
+    rd.forEach(function (m) {
+      if (m.p1 && m.p2) { bracketMatches++; if (m.winner) bracketDecided++; }
+    });
+  });
+  var progressPct = bracketMatches > 0 ? Math.round((bracketDecided / bracketMatches) * 100) : 0;
+  var scored = 0;
+  (ev.players || []).forEach(function (pl) {
+    var sc = ev.scores[pl.id] || [];
+    if (computeEntryAvg(sc, ev.nj, prelimRounds) > 0) scored++;
+  });
+
+  // Crews represented
+  var crewCounts = {};
+  (ev.players || []).forEach(function (pl) {
+    var k = pl.crew || "(no crew)";
+    crewCounts[k] = (crewCounts[k] || 0) + 1;
+  });
+  var crewList = Object.keys(crewCounts).map(function (k) {
+    return { name: k, count: crewCounts[k] };
+  }).sort(function (a, b) { return b.count - a.count; });
+  var maxCrew = crewList[0] ? crewList[0].count : 1;
+
+  // Score distribution (avg prelim per breaker)
+  var avgs = (ev.players || []).map(function (pl) {
+    var sc = ev.scores[pl.id] || [];
+    return computeEntryAvg(sc, ev.nj, prelimRounds);
+  }).filter(function (v) { return v > 0; });
+  var bins = [0, 0, 0, 0, 0]; // 0-2, 2-4, 4-6, 6-8, 8-10
+  avgs.forEach(function (v) {
+    var idx = Math.min(4, Math.floor(v / 2));
+    bins[idx]++;
+  });
+  var binMax = Math.max.apply(null, bins.concat([1]));
+
+  // Judge averages
+  var judgeStats = [];
+  for (var j = 0; j < ev.nj; j++) {
+    var sum = 0, count = 0;
+    (ev.players || []).forEach(function (pl) {
+      var sc = ev.scores[pl.id] || [];
+      var jArr = sc[j];
+      if (Array.isArray(jArr)) {
+        jArr.forEach(function (v) { if (typeof v === "number" && v > 0) { sum += v; count++; } });
+      } else if (typeof jArr === "number" && jArr > 0) {
+        sum += jArr; count++;
+      }
+    });
+    judgeStats.push({
+      name: (ev.jn && ev.jn[j]) || ("Judge " + (j + 1)),
+      avg: count > 0 ? sum / count : 0,
+      sampled: count
+    });
+  }
+  var consensusAvg = judgeStats.length > 0
+    ? judgeStats.reduce(function (s, x) { return s + x.avg; }, 0) / judgeStats.length
+    : 0;
+
+  // Top 3 from prelims
+  var ranked = (ev.players || []).map(function (pl) {
+    var sc = ev.scores[pl.id] || [];
+    return Object.assign({}, pl, { avg: computeEntryAvg(sc, ev.nj, prelimRounds) });
+  }).filter(function (pl) { return pl.avg > 0; })
+    .sort(function (a, b2) { return b2.avg - a.avg })
+    .slice(0, 3);
+
+  // SVG progress ring math
+  var R = 50, C = 2 * Math.PI * R; // circumference
+  var dash = (progressPct / 100) * C;
+
+  function StatBlock(props) {
+    return <div style={{
+      background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10,
+      padding: "14px 12px", textAlign: "center", animation: "fu .3s ease"
+    }}>
+      <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".15em", marginBottom: 6 }}>{props.label}</div>
+      <div style={{ fontSize: 32, fontFamily: "Oswald", fontWeight: 700, color: props.color, lineHeight: 1 }}>{props.value}</div>
+      {props.sub && <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 4 }}>{props.sub}</div>}
+    </div>;
+  }
+
+  return <div style={{ animation: "fu .3s ease" }}>
+    {/* Hero stat row */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 14 }}>
+      <StatBlock label="BREAKERS" value={breakers} color="var(--ac)" sub={scored + " scored"} />
+      <StatBlock label="JUDGES" value={judges} color="var(--jd)" />
+      <StatBlock label="MATCHES" value={bracketMatches} color="var(--cr)" sub={bracketDecided + " decided"} />
+      <StatBlock label="PROGRESS" value={progressPct + "%"} color="var(--gn)" />
+    </div>
+
+    {/* Top 3 podium */}
+    {ranked.length > 0 && <Crd sx={{ marginBottom: 14 }}>
+      <Lbl>🏆 Top 3 from prelims</Lbl>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 12, padding: "12px 0 4px" }}>
+        {[1, 0, 2].map(function (idx) {
+          var pl = ranked[idx];
+          if (!pl) return null;
+          var heights = { 0: 84, 1: 60, 2: 48 };
+          var medals = { 0: "🥇", 1: "🥈", 2: "🥉" };
+          var colors = { 0: "var(--gd)", 1: "var(--dm)", 2: "var(--cr)" };
+          return <div key={idx} style={{ flex: 1, maxWidth: 130, textAlign: "center" }}>
+            <Av name={pl.name} sz={36} />
+            <div style={{ fontSize: 12, fontFamily: "Oswald", fontWeight: 700, color: "var(--tx)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.name}</div>
+            <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{pl.avg.toFixed(2)}</div>
+            <div style={{
+              marginTop: 6, height: heights[idx], background: colors[idx], borderRadius: "6px 6px 0 0",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+              boxShadow: "0 -2px 0 rgba(0,0,0,.2) inset"
+            }}>{medals[idx]}</div>
+          </div>;
+        })}
+      </div>
+    </Crd>}
+
+    {/* Bracket progress ring */}
+    {bracketMatches > 0 && <Crd sx={{ marginBottom: 14 }}>
+      <Lbl>Bracket Progress</Lbl>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "8px 0" }}>
+        <svg viewBox="0 0 120 120" width="110" height="110" style={{ flexShrink: 0 }}>
+          <circle cx="60" cy="60" r={R} fill="none" stroke="var(--c2)" strokeWidth="12" />
+          <circle cx="60" cy="60" r={R} fill="none" stroke="var(--gn)" strokeWidth="12"
+            strokeDasharray={dash + " " + C}
+            transform="rotate(-90 60 60)"
+            strokeLinecap="round"
+            style={{ transition: "stroke-dasharray .8s ease" }} />
+          <text x="60" y="58" textAnchor="middle" fontSize="22" fill="var(--tx)" fontFamily="Oswald" fontWeight="700">{progressPct}%</text>
+          <text x="60" y="76" textAnchor="middle" fontSize="9" fill="var(--dm)" fontFamily="JetBrains Mono" letterSpacing="2">DECIDED</text>
+        </svg>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 22, fontFamily: "Oswald", fontWeight: 700, color: "var(--tx)" }}>{bracketDecided} <span style={{ color: "var(--dm)", fontWeight: 400 }}>/ {bracketMatches}</span></div>
+          <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".1em", marginTop: 2 }}>MATCHES DECIDED</div>
+          <div style={{ fontSize: 12, color: "var(--dm)", marginTop: 8 }}>
+            {bracketDecided === bracketMatches ? "🏁 Bracket complete." :
+              bracketDecided === 0 ? "Bracket not started yet." :
+                bracketMatches - bracketDecided + " match" + ((bracketMatches - bracketDecided) === 1 ? "" : "es") + " remaining."}
+          </div>
+        </div>
+      </div>
+    </Crd>}
+
+    {/* Crews represented */}
+    {crewList.length > 0 && <Crd sx={{ marginBottom: 14 }}>
+      <Lbl>Crews Represented ({crewList.length})</Lbl>
+      <div style={{ padding: "6px 0" }}>
+        {crewList.map(function (c, i) {
+          var pct = Math.round((c.count / maxCrew) * 100);
+          return <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <div style={{ width: 110, fontSize: 13, fontFamily: "Oswald", color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+            <div style={{ flex: 1, background: "var(--c2)", borderRadius: 4, height: 18, position: "relative", overflow: "hidden" }}>
+              <div style={{
+                width: pct + "%",
+                height: "100%",
+                background: "linear-gradient(90deg, var(--ac), var(--cr))",
+                borderRadius: 4,
+                transition: "width .8s ease",
+                animation: "fu .5s ease"
+              }} />
+            </div>
+            <div style={{ width: 36, textAlign: "right", fontSize: 14, fontFamily: "Oswald", fontWeight: 700, color: "var(--tx)" }}>{c.count}</div>
+          </div>;
+        })}
+      </div>
+    </Crd>}
+
+    {/* Score distribution histogram */}
+    {avgs.length > 0 && <Crd sx={{ marginBottom: 14 }}>
+      <Lbl>Prelim Score Distribution</Lbl>
+      <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 10 }}>
+        Where the {avgs.length} scored breaker{avgs.length === 1 ? "" : "s"} land on the 0–10 scale.
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 140, padding: "4px 0", borderBottom: "1px solid var(--b1)" }}>
+        {bins.map(function (c, i) {
+          var h = binMax > 0 ? (c / binMax) * 100 : 0;
+          var colors = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
+          return <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
+            <div style={{ fontSize: 12, color: c > 0 ? "var(--tx)" : "var(--dm)", fontFamily: "Oswald", fontWeight: 700 }}>{c}</div>
+            <div style={{
+              width: "100%",
+              height: h + "%",
+              background: colors[i],
+              borderRadius: "4px 4px 0 0",
+              transition: "height .8s ease",
+              minHeight: c > 0 ? 4 : 0,
+              boxShadow: "0 -2px 4px rgba(0,0,0,.15) inset"
+            }} />
+          </div>;
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        {[0, 2, 4, 6, 8].map(function (lo, i) {
+          return <div key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{lo}–{lo + 2}</div>;
+        })}
+      </div>
+    </Crd>}
+
+    {/* Judge comparison */}
+    {ev.nj > 0 && judgeStats.some(function (x) { return x.sampled > 0; }) && <Crd sx={{ marginBottom: 14 }}>
+      <Lbl>Judge Comparison</Lbl>
+      <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 10 }}>
+        Each judge's average score across all breakers. Panel consensus: <b style={{ color: "var(--tx)" }}>{consensusAvg.toFixed(2)}</b>. Last column = ± from consensus.
+      </div>
+      <div style={{ padding: "6px 0" }}>
+        {judgeStats.map(function (jj, i) {
+          var pct = (jj.avg / 10) * 100;
+          var conPct = (consensusAvg / 10) * 100;
+          var diff = jj.avg - consensusAvg;
+          var diffColor = Math.abs(diff) < 0.3 ? "var(--gn)" : Math.abs(diff) < 0.7 ? "var(--gd)" : "var(--cr)";
+          return <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <div style={{ width: 108, fontSize: 13, fontFamily: "Oswald", color: "var(--tx)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jj.name}</div>
+            <div style={{ flex: 1, background: "var(--c2)", borderRadius: 4, height: 18, position: "relative", overflow: "hidden" }}>
+              <div style={{
+                width: pct + "%",
+                height: "100%",
+                background: "linear-gradient(90deg, var(--jd), var(--ac))",
+                borderRadius: 4,
+                transition: "width .8s ease"
+              }} />
+              {consensusAvg > 0 && <div style={{
+                position: "absolute", top: -2, bottom: -2,
+                left: conPct + "%",
+                width: 0, borderLeft: "2px dashed var(--gd)", pointerEvents: "none"
+              }} title={"Panel consensus: " + consensusAvg.toFixed(2)} />}
+            </div>
+            <div style={{ width: 38, textAlign: "right", fontSize: 13, fontFamily: "JetBrains Mono", color: "var(--tx)" }}>{jj.avg.toFixed(1)}</div>
+            <div style={{ width: 40, textAlign: "right", fontSize: 10, fontFamily: "JetBrains Mono", color: diffColor }}>
+              {jj.sampled === 0 ? "—" : (diff >= 0 ? "+" : "") + diff.toFixed(1)}
+            </div>
+          </div>;
+        })}
+      </div>
+    </Crd>}
+
+    {breakers === 0 && <Crd>
+      <div style={{ textAlign: "center", padding: 20, color: "var(--dm)", fontSize: 13 }}>
+        Add breakers to start seeing analytics.
+      </div>
+    </Crd>}
+  </div>;
+}
+
 function EventDetailView(p) {
   var ev = p.ev;
   var upd = p.upd;
@@ -5784,6 +6082,7 @@ function EventDetailView(p) {
         {showSeeding && <TBtn label="Seeding" title="Pair the top-seeded breakers into the bracket" active={tab === "seeding"} onClick={function () { setTab("seeding") }} />}
         <TBtn label="Judges" title="Set judge names and PIN — judges score via the Judge Portal" active={tab === "judges"} onClick={function () { setTab("judges") }} />
         <TBtn label={formatTab.label} title={formatTab.title} active={tab === formatTab.id} onClick={function () { setTab(formatTab.id) }} />
+        <TBtn label="📊 Analytics" title="Event analytics — crews, scores, judge agreement, bracket progress" active={tab === "analytics"} onClick={function () { setTab("analytics") }} />
       </div>;
     })()}
 
@@ -6001,6 +6300,8 @@ function EventDetailView(p) {
     {tab === "format" && ev.type === "solitaire" && <SolitaireMode ev={ev} ranked={ranked} upd={upd} />}
     {tab === "format" && isCaptureFormat(ev.type) && <CaptureMode ev={ev} ranked={ranked} upd={upd} />}
     {tab === "format" && isLmsFormat(ev.type) && <LmsMode ev={ev} ranked={ranked} upd={upd} />}
+
+    {tab === "analytics" && <EventAnalytics ev={ev} />}
 
     {tab === "bracket" && !ev.bracket && <EmptyState
       icon="🏆"
@@ -6396,11 +6697,18 @@ function ClaimsInbox(p) {
       .then(function () { setTick(tick + 1); });
   }
   return <Crd sx={{ marginBottom: 12, borderColor: "var(--gd)", borderWidth: 1, background: "var(--gd2)" }}>
-    <Lbl>📥 Pending Profile Claims ({pending.length})</Lbl>
+    <Lbl>📥 Pending Claims ({pending.length})</Lbl>
     {pending.map(function (c) {
-      var pr = (p.profiles || []).find(function (x) { return x.id === c.profileId; });
+      var kind = c.kind || "dancer";
+      var isCrew = kind === "crew_manager" || kind === "crew_member";
+      var entity = isCrew
+        ? (p.crews || []).find(function (x) { return x.id === c.profileId; })
+        : (p.profiles || []).find(function (x) { return x.id === c.profileId; });
+      var entityName = entity ? (isCrew ? entity.name : entity.breakingName) : (isCrew ? "(deleted crew)" : "(deleted profile)");
       var isGuardian = (c.message || "").trim().toUpperCase().startsWith("[GUARDIAN]");
       var displayMsg = isGuardian ? c.message.replace(/^\s*\[GUARDIAN\]\s*/i, "") : c.message;
+      var kindLabel = kind === "crew_manager" ? "🛡️ MANAGER" : kind === "crew_member" ? "👥 MEMBER" : "💃 DANCER";
+      var kindColor = kind === "crew_manager" ? "var(--cr)" : kind === "crew_member" ? "var(--jd)" : "var(--ac)";
       return <div key={c.id} style={{
         background: "var(--c1)", borderRadius: 8, padding: "10px 12px",
         border: "1px solid var(--b1)", marginBottom: 6
@@ -6408,7 +6716,8 @@ function ClaimsInbox(p) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontFamily: "Oswald", color: "var(--tx)", fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              {c.userEmail} <span style={{ color: "var(--dm)", fontWeight: 400 }}>claims</span> {pr ? pr.breakingName : "(deleted profile)"}
+              <Tag c={kindColor} bg="var(--c2)">{kindLabel}</Tag>
+              {c.userEmail} <span style={{ color: "var(--dm)", fontWeight: 400 }}>claims</span> {entityName}
               {isGuardian && <Tag c="var(--gd)" bg="var(--gd2)">👨‍👧 GUARDIAN</Tag>}
             </div>
             {displayMsg && <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 4, fontStyle: "italic" }}>"{displayMsg}"</div>}
@@ -6630,7 +6939,7 @@ function Admin(p) {
       <Btn v="gh" onClick={function () { setView("settings") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>Settings</Btn>
     </div>
 
-    <ClaimsInbox profiles={p.profiles} />
+    <ClaimsInbox profiles={p.profiles} crews={p.crews} />
 
     {actEvs.length > 0 && <Lbl>Local Events</Lbl>}
     {actEvs.map(function (e) {
