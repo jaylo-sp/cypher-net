@@ -7656,29 +7656,41 @@ function RoleGate(p) {
       <h1 style={{
         fontFamily: "Anton, Impact, sans-serif", fontSize: 84, letterSpacing: "-.01em",
         color: "var(--tx)", textTransform: "uppercase",
-        lineHeight: 1, marginBottom: 36, fontWeight: 400
+        lineHeight: 1, marginBottom: 14, fontWeight: 400
       }}>CYPHER NET</h1>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <Btn onClick={function () { tryEnter("admin") }} sx={{ width: "100%", padding: "18px", fontSize: 18 }}>
-          {meIsAdmin ? "👑 Enter as Administrator" : (p.pins.admin ? "🔒 Administrator" : "Enter as Administrator")}
+      {!me && <div style={{ fontSize: 13, color: "var(--dm)", marginBottom: 28, lineHeight: 1.5 }}>
+        Sign in to follow events, watchlist crews, and claim your dancer profile.
+      </div>}
+      {me && <div style={{ fontSize: 13, color: "var(--dm)", marginBottom: 28, fontFamily: "JetBrains Mono" }}>
+        Welcome back, <span style={{ color: "var(--tx)" }}>{me.displayName || me.email}</span>.
+      </div>}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {!me && <Btn onClick={function () { setShowAuth(true); }} sx={{ width: "100%", padding: "18px", fontSize: 17 }}>
+          Sign In or Create Account
+        </Btn>}
+        <Btn v={me ? "pri" : "out"} onClick={function () { tryEnter("audience") }} sx={{ width: "100%", padding: "16px", fontSize: 16 }}>
+          {me ? "Continue as Audience" : "Continue as Guest"}
         </Btn>
-        <Btn v="gn" onClick={function () { tryEnter("judge") }} sx={{ width: "100%", padding: "18px", fontSize: 18 }}>
-          {meIsJudge ? ("⚖️ Enter as Judge (" + judgeEvents.length + " event" + (judgeEvents.length === 1 ? "" : "s") + ")") : (p.pins.judge ? "🔒 Judge" : "Enter as Judge")}
-        </Btn>
-        <Btn v="gh" onClick={function () { tryEnter("audience") }} sx={{ width: "100%", padding: "18px", fontSize: 18 }}>
-          Audience / Spectator
+        <Btn v="gh" onClick={function () { tryEnter("judge") }} sx={{ width: "100%", padding: "14px", fontSize: 14 }}>
+          {meIsJudge ? ("⚖️ Enter as Judge (" + judgeEvents.length + " event" + (judgeEvents.length === 1 ? "" : "s") + ")") : (p.pins.judge ? "🔒 Enter as Judge" : "Enter as Judge")}
         </Btn>
       </div>
 
-      {!me && (<div style={{
-        marginTop: 18, fontSize: 12, color: "var(--dm)",
-        padding: "10px", background: "var(--c1)", borderRadius: 10, border: "1px solid var(--b1)"
-      }}>
-        Sign in to skip PINs and unlock watchlist + profile claims.
-      </div>)}
-
     </div>
+
+    {/* Discreet admin corner */}
+    <button onClick={function () { tryEnter("admin") }} title="Administrator access" style={{
+      position: "fixed", bottom: 14, right: 14,
+      padding: "8px 12px", borderRadius: 8,
+      background: "transparent", color: "var(--dm)",
+      border: "1px dashed var(--b1)",
+      fontSize: 11, fontFamily: "JetBrains Mono", letterSpacing: ".15em",
+      cursor: "pointer", textTransform: "uppercase"
+    }}>
+      {meIsAdmin ? "👑 Admin" : (p.pins.admin ? "🔒 Admin" : "Admin")}
+    </button>
   </div>);
 }
 
