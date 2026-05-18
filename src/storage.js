@@ -74,14 +74,20 @@ export const storage = {
         .upsert({ key, value, updated_at: new Date().toISOString() })
       if (error) {
         setConn(false, error);
-        console.warn('Supabase set failed, localStorage still saved', error)
+        // RLS denial on user_data is expected for non-admin sessions (audience,
+        // judge, embed). Log quietly without scaring the operator.
+        var msg = (error.message || String(error));
+        var isRls = /row-level security|RLS|policy/i.test(msg);
+        if (!isRls) console.warn('Supabase set failed (localStorage still saved):', msg);
       } else {
         setConn(true);
       }
       return { key, value }
     } catch (e) {
       setConn(false, e);
-      console.warn('Supabase set failed, localStorage still saved', e)
+      var emsg = (e && e.message) || String(e);
+      var isRls2 = /row-level security|RLS|policy/i.test(emsg);
+      if (!isRls2) console.warn('Supabase set failed (localStorage still saved):', emsg);
       return { key, value }
     }
   },

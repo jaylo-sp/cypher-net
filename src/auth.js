@@ -137,6 +137,20 @@ export const auth = {
     return sb.auth.signOut().then(function () { _user = null; });
   },
 
+  // Google OAuth sign-in. Requires the Google provider to be enabled in the
+  // Supabase project (Auth → Providers). Supabase handles the redirect dance;
+  // we land back on window.location.origin and onAuthStateChange picks it up.
+  signInWithGoogle: function () {
+    if (!hasSupabase) return Promise.resolve({ error: "Google sign-in requires Supabase (you're in demo mode)." });
+    return sb.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: typeof window !== "undefined" ? window.location.origin : undefined }
+    }).then(function (res) {
+      if (res.error) return { error: res.error.message };
+      return { ok: true };
+    });
+  },
+
   // Send a password-reset email. Supabase generates a link to the current origin.
   resetPassword: function (email) {
     const em = normalizeEmail(email);
@@ -355,6 +369,183 @@ export const profileExtras = {
     return sb.from("profile_extras").upsert(Object.assign({ profile_id: profileId, updated_at: new Date().toISOString() }, clean)).then(function (res) {
       if (res.error) { console.warn("profile_extras set failed", res.error); return { error: res.error.message }; }
       return { ok: true };
+    });
+  }
+};
+
+// ── Clip submissions: verified dancers + admin propose video clips ──
+// Admin clips auto-approve via the existing 📺 button (no submission needed).
+// Verified-dancer clips land as `pending` here, surface in the admin's
+// ClipInbox, and on Approve get merged into event.players[i].clip.
+const MOCK_CLIPS_KEY = "bb-clip-submissions-v1";
+function mockClips() {
+  try { var raw = localStorage.getItem(MOCK_CLIPS_KEY); return raw ? JSON.parse(raw) : []; } catch (e) { return []; }
+}
+function mockSaveClips(arr) { try { localStorage.setItem(MOCK_CLIPS_KEY, JSON.stringify(arr)); } catch (e) {} }
+
+function _clipRowToCamel(r) {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    userEmail: r.user_email,
+    userDisplayName: r.user_display_name,
+    eventId: r.event_id,
+    eventName: r.event_name,
+    playerId: r.player_id,
+    breakerName: r.breaker_name,
+    url: r.url,
+    message: r.message,
+    status: r.status,
+    createdAt: r.created_at,
+    decidedAt: r.decided_at,
+    decidedBy: r.decided_by
+  };
+}
+
+export const clipSubmissions = {
+  // Admin: all submissions, newest first.
+  list: function () {
+    if (!hasSupabase) return Promise.resolve(mockClips());
+    return sb.from("clip_submissions").select("*").order("created_at", { ascending: false }).then(function (res) {
+      if (res.error) { console.warn("clip_submissions list failed", res.error); return []; }
+      return (res.data || []).map(_clipRowToCamel);
+    });
+  },
+  // Submitter view: their own submissions.
+  listForUser: function (uid) {
+    if (!hasSupabase) return Promise.resolve(mockClips().filter(function (c) { return c.userId === uid; }));
+    if (!uid) return Promise.resolve([]);
+    return sb.from("clip_submissions").select("*").eq("user_id", uid).order("created_at", { ascending: false }).then(function (res) {
+      if (res.error) { console.warn("clip_submissions listForUser failed", res.error); return []; }
+      return (res.data || []).map(_clipRowToCamel);
+    });
+  },
+  add: function (sub) {
+    if (!hasSupabase) {
+      var all = mockClips();
+      var row = Object.assign({ id: "clip_" + Date.now(), status: "pending", createdAt: new Date().toISOString() }, sub);
+      all.unshift(row); mockSaveClips(all);
+      return Promise.resolve(row);
+    }
+    return sb.from("clip_submissions").insert({
+      user_id: sub.userId, user_email: sub.userEmail, user_display_name: sub.userDisplayName,
+      event_id: sub.eventId, event_name: sub.eventName,
+      player_id: sub.playerId, breaker_name: sub.breakerName,
+      url: sub.url, message: sub.message || null, status: "pending"
+    }).select().then(function (res) {
+      if (res.error) { console.warn("clip add failed", res.error); return { error: res.error.message }; }
+      return { ok: true, row: (res.data && res.data[0]) ? _clipRowToCamel(res.data[0]) : null };
+    });
+  },
+  // Admin: change status (approve / reject). Pass decidedBy = current user id.
+  update: function (id, patch) {
+    if (!hasSupabase) {
+      var all = mockClips().map(function (c) { return c.id === id ? Object.assign({}, c, patch) : c; });
+      mockSaveClips(all);
+      return Promise.resolve();
+    }
+    var sn = {};
+    if (patch.status) sn.status = patch.status;
+    sn.decided_at = patch.decidedAt || new Date().toISOString();
+    if (patch.decidedBy) sn.decided_by = patch.decidedBy;
+    return sb.from("clip_submissions").update(sn).eq("id", id).then(function (res) {
+      if (res.error) console.warn("clip update failed", res.error);
+    });
+  },
+  // Submitter: withdraw their own pending submission.
+  remove: function (id) {
+    if (!hasSupabase) {
+      var all = mockClips().filter(function (c) { return c.id !== id; });
+      mockSaveClips(all);
+      return Promise.resolve();
+    }
+    return sb.from("clip_submissions").delete().eq("id", id).then(function (res) {
+      if (res.error) console.warn("clip remove failed", res.error);
+    });
+  }
+};
+
+// ── Profile removal requests: verified dancers ask to be removed ──
+// Only insertable by users with an approved dancer claim on the profile_id.
+// Admin reviews; on approval, the frontend marks profile.archived = true.
+const MOCK_REMOVAL_KEY = "bb-profile-removal-requests-v1";
+function mockRemovals() {
+  try { var raw = localStorage.getItem(MOCK_REMOVAL_KEY); return raw ? JSON.parse(raw) : []; } catch (e) { return []; }
+}
+function mockSaveRemovals(arr) { try { localStorage.setItem(MOCK_REMOVAL_KEY, JSON.stringify(arr)); } catch (e) {} }
+
+function _removalRowToCamel(r) {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    userEmail: r.user_email,
+    userDisplayName: r.user_display_name,
+    profileId: r.profile_id,
+    profileName: r.profile_name,
+    reason: r.reason,
+    status: r.status,
+    createdAt: r.created_at,
+    decidedAt: r.decided_at,
+    decidedBy: r.decided_by,
+    adminNotes: r.admin_notes
+  };
+}
+
+export const removalRequests = {
+  list: function () {
+    if (!hasSupabase) return Promise.resolve(mockRemovals());
+    return sb.from("profile_removal_requests").select("*").order("created_at", { ascending: false }).then(function (res) {
+      if (res.error) { console.warn("removal_requests list failed", res.error); return []; }
+      return (res.data || []).map(_removalRowToCamel);
+    });
+  },
+  listForUser: function (uid) {
+    if (!hasSupabase) return Promise.resolve(mockRemovals().filter(function (r) { return r.userId === uid; }));
+    if (!uid) return Promise.resolve([]);
+    return sb.from("profile_removal_requests").select("*").eq("user_id", uid).order("created_at", { ascending: false }).then(function (res) {
+      if (res.error) { console.warn("removal_requests listForUser failed", res.error); return []; }
+      return (res.data || []).map(_removalRowToCamel);
+    });
+  },
+  add: function (req) {
+    if (!hasSupabase) {
+      var all = mockRemovals();
+      var row = Object.assign({ id: "rem_" + Date.now(), status: "pending", createdAt: new Date().toISOString() }, req);
+      all.unshift(row); mockSaveRemovals(all);
+      return Promise.resolve({ ok: true, row: row });
+    }
+    return sb.from("profile_removal_requests").insert({
+      user_id: req.userId, user_email: req.userEmail, user_display_name: req.userDisplayName,
+      profile_id: req.profileId, profile_name: req.profileName,
+      reason: req.reason, status: "pending"
+    }).select().then(function (res) {
+      if (res.error) { console.warn("removal_requests add failed", res.error); return { error: res.error.message }; }
+      return { ok: true, row: (res.data && res.data[0]) ? _removalRowToCamel(res.data[0]) : null };
+    });
+  },
+  update: function (id, patch) {
+    if (!hasSupabase) {
+      var all = mockRemovals().map(function (r) { return r.id === id ? Object.assign({}, r, patch) : r; });
+      mockSaveRemovals(all);
+      return Promise.resolve();
+    }
+    var sn = {};
+    if (patch.status) sn.status = patch.status;
+    sn.decided_at = patch.decidedAt || new Date().toISOString();
+    if (patch.decidedBy) sn.decided_by = patch.decidedBy;
+    if (patch.adminNotes !== undefined) sn.admin_notes = patch.adminNotes;
+    return sb.from("profile_removal_requests").update(sn).eq("id", id).then(function (res) {
+      if (res.error) console.warn("removal_requests update failed", res.error);
+    });
+  },
+  remove: function (id) {
+    if (!hasSupabase) {
+      var all = mockRemovals().filter(function (r) { return r.id !== id; });
+      mockSaveRemovals(all);
+      return Promise.resolve();
+    }
+    return sb.from("profile_removal_requests").delete().eq("id", id).then(function (res) {
+      if (res.error) console.warn("removal_requests remove failed", res.error);
     });
   }
 };

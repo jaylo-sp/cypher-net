@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { storage, exportBackup, importBackup, STORAGE_KEY, connection } from "./storage.js";
-import { auth, audienceStore, claimsQueue, judgeGrants, isAdminEmail, profileExtras } from "./auth.js";
+import { auth, audienceStore, claimsQueue, clipSubmissions, judgeGrants, isAdminEmail, profileExtras, removalRequests } from "./auth.js";
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -48,8 +48,46 @@ function eventInWindow(ev, win) {
   if (win === "30d") return (now - d) / 86400000 <= 30;
   if (win === "90d") return (now - d) / 86400000 <= 90;
   if (win === "6mo") return (now - d) / 86400000 <= 180;
+  if (win === "month") return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   if (win === "year") return d.getFullYear() === now.getFullYear();
   return true;
+}
+
+// Greater Vancouver area for the "local vs non-local" breakdown. Anything outside
+// this list counts as out-of-town for the analytics view. (Lowercased for compare.)
+var GREATER_VANCOUVER = [
+  "vancouver", "burnaby", "richmond", "surrey", "coquitlam", "north vancouver",
+  "west vancouver", "new westminster", "delta", "langley", "port coquitlam",
+  "port moody", "maple ridge", "white rock", "abbotsford", "pitt meadows",
+  "tsawwassen", "ladner", "squamish"
+];
+function isLocalEvent(ev) {
+  if (!ev) return false;
+  var city = (ev.details && ev.details.city) || ev.city || "";
+  return GREATER_VANCOUVER.indexOf(String(city).trim().toLowerCase()) >= 0;
+}
+
+// Country name → emoji flag. Falls back to "" if not recognised.
+// Built from regional indicator unicode for the country's ISO-2 code.
+var COUNTRY_ISO = {
+  "Canada": "CA", "United States": "US", "USA": "US", "Mexico": "MX",
+  "Japan": "JP", "South Korea": "KR", "Korea": "KR", "China": "CN", "Taiwan": "TW",
+  "Hong Kong": "HK", "Singapore": "SG", "Thailand": "TH", "Vietnam": "VN",
+  "Philippines": "PH", "Indonesia": "ID", "Malaysia": "MY", "India": "IN",
+  "Australia": "AU", "New Zealand": "NZ",
+  "United Kingdom": "GB", "UK": "GB", "Ireland": "IE", "France": "FR", "Germany": "DE",
+  "Spain": "ES", "Italy": "IT", "Netherlands": "NL", "Belgium": "BE", "Switzerland": "CH",
+  "Sweden": "SE", "Norway": "NO", "Denmark": "DK", "Finland": "FI", "Poland": "PL",
+  "Russia": "RU", "Ukraine": "UA", "Czech Republic": "CZ", "Greece": "GR", "Portugal": "PT",
+  "Brazil": "BR", "Argentina": "AR", "Chile": "CL", "Colombia": "CO", "Peru": "PE"
+};
+function countryFlag(country) {
+  if (!country) return "";
+  var iso = COUNTRY_ISO[country] || (country.length === 2 ? country.toUpperCase() : null);
+  if (!iso || iso.length !== 2) return "";
+  return iso.toUpperCase().replace(/./g, function (c) {
+    return String.fromCodePoint(127397 + c.charCodeAt(0));
+  });
 }
 function eventInFormat(ev, fmt) {
   if (!fmt || fmt === "all") return true;
@@ -284,7 +322,8 @@ var EVENT_FIELDS = [
   {
     section: "Stream", icon: "📺",
     fields: [
-      { key: "streamUrl", label: "Live Stream URL (YouTube or Twitch)", type: "text", placeholder: "https://youtube.com/watch?v=… or https://twitch.tv/yourchannel" }
+      { key: "streamUrl", label: "Live Stream URL (YouTube or Twitch)", type: "text", placeholder: "https://youtube.com/watch?v=… or https://twitch.tv/yourchannel" },
+      { key: "recapUrl", label: "Post-Event Recap (YouTube)", type: "text", placeholder: "https://youtu.be/… — surfaces in Archive widget once event is decided" }
     ]
   },
   {
@@ -578,7 +617,7 @@ function readEmbedConfig() {
       kind: embed,
       mode: sp.get("mode") || "players",
       country: sp.get("country") || "All",
-      sort: sp.get("sort") || "dpr",
+      sort: sp.get("sort") || "wins",
       limit: Math.max(1, Math.min(100, parseInt(sp.get("limit") || "10", 10) || 10)),
       theme: sp.get("theme") === "light" ? "light" : "dark",
       compact: sp.get("compact") === "1",
@@ -586,7 +625,11 @@ function readEmbedConfig() {
       format: sp.get("format") || "all",
       q: sp.get("q") || "",
       interactive: sp.get("interactive") !== "0",  // default ON — embed has filter chips
-      view: sp.get("view") || "dashboard"  // "dashboard" | "list"
+      view: sp.get("view") || "dashboard",  // "dashboard" | "list"
+      eventId: sp.get("event") || null,   // live-event + event-recap widgets
+      dancerId: sp.get("dancer") || null, // dancer-profile widget: target profile
+      crewId: sp.get("crew") || null,     // crew widget: target crew
+      tab: sp.get("tab") || "overview"    // dancer-profile widget: initial tab
     };
   } catch (e) { return null; }
 }
@@ -644,11 +687,125 @@ function StatusBadge(p) {
 // in your scene. Field name kept as `inVan` for back-compat with existing data.
 function isActive(pr) { return !!(pr && pr.inVan); }
 
+// Standard tournament seed-pairing orders. Index = round-0 slot; value = 1-based
+// seed number. Pairs highest vs lowest so the bracket protects top seeds:
+// #1 cannot meet #2 before the Final, and #1 cannot meet #3 or #4 before the Semi.
+var SEED_ORDERS = {
+  2:  [1, 2],
+  4:  [1, 4, 2, 3],
+  8:  [1, 8, 4, 5, 2, 7, 3, 6],
+  16: [1, 16, 8, 9, 4, 13, 5, 12, 2, 15, 7, 10, 3, 14, 6, 11],
+  32: [1, 32, 16, 17, 8, 25, 9, 24, 4, 29, 13, 20, 5, 28, 12, 21,
+       2, 31, 15, 18, 7, 26, 10, 23, 3, 30, 14, 19, 6, 27, 11, 22]
+};
+
+// Browser-side bracket → PNG export. Builds an SVG poster (1080×1920 portrait,
+// Instagram-story ratio) and rasterizes it via a Canvas. Triggers a download.
+// No new deps — uses XMLSerializer + canvas.toBlob.
+function _xmlEsc(s) {
+  return String(s || "").replace(/[<>&'"]/g, function (c) {
+    return c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;" : c === "'" ? "&apos;" : "&quot;";
+  });
+}
+function buildBracketPosterSvg(ev) {
+  var W = 1080, H = 1920, PAD = 60;
+  var bk = ev.bracket || [];
+  var champ = bk.length ? (bk[bk.length - 1][0] && bk[bk.length - 1][0].winner) : null;
+  var parts = [];
+  parts.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">');
+  parts.push('<rect width="100%" height="100%" fill="#f4f4f3"/>');
+  // Header
+  parts.push('<text x="' + (W / 2) + '" y="130" text-anchor="middle" font-family="Impact, Anton, sans-serif" font-size="72" fill="#111111">' + _xmlEsc(ev.name) + '</text>');
+  if (ev.dt) parts.push('<text x="' + (W / 2) + '" y="180" text-anchor="middle" font-family="monospace" font-size="26" letter-spacing="6" fill="#737373" font-weight="700">' + _xmlEsc(fmtD(ev.dt).toUpperCase()) + '</text>');
+  if (ev.details && (ev.details.venueName || ev.details.city)) {
+    parts.push('<text x="' + (W / 2) + '" y="220" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#737373">' + _xmlEsc([ev.details.venueName, ev.details.city].filter(Boolean).join(" · ")) + '</text>');
+  }
+  // Matches list grouped by round
+  var y = 290;
+  bk.forEach(function (rd, ri) {
+    parts.push('<text x="' + (W / 2) + '" y="' + y + '" text-anchor="middle" font-family="monospace" font-size="24" letter-spacing="8" fill="#3a1fcb" font-weight="900">◆ ' + _xmlEsc(getRN(bk, ri).toUpperCase()) + '</text>');
+    y += 40;
+    rd.forEach(function (m) {
+      var a = m.p1, b = m.p2, w = m.winner;
+      var aWin = w && a && w.id === a.id;
+      var bWin = w && b && w.id === b.id;
+      // Card
+      parts.push('<rect x="' + PAD + '" y="' + y + '" width="' + (W - 2 * PAD) + '" height="92" rx="10" fill="#ffffff" stroke="' + (w ? "#b8860b" : "#dad9d6") + '" stroke-width="' + (w ? 2 : 1) + '"/>');
+      // Names
+      var leftY = y + 36, rightY = y + 78;
+      parts.push('<text x="' + (PAD + 24) + '" y="' + leftY + '" font-family="sans-serif" font-size="26" font-weight="' + (aWin ? 900 : 600) + '" fill="' + (aWin ? "#b8860b" : "#111111") + '">' + _xmlEsc(a ? a.name : "—") + '</text>');
+      parts.push('<text x="' + (PAD + 24) + '" y="' + rightY + '" font-family="sans-serif" font-size="26" font-weight="' + (bWin ? 900 : 600) + '" fill="' + (bWin ? "#b8860b" : "#111111") + '">' + _xmlEsc(b ? b.name : "—") + '</text>');
+      // WIN badge
+      if (aWin) parts.push('<text x="' + (W - PAD - 24) + '" y="' + leftY + '" text-anchor="end" font-family="monospace" font-size="20" font-weight="900" fill="#b8860b">WIN</text>');
+      if (bWin) parts.push('<text x="' + (W - PAD - 24) + '" y="' + rightY + '" text-anchor="end" font-family="monospace" font-size="20" font-weight="900" fill="#b8860b">WIN</text>');
+      y += 104;
+    });
+    y += 18;
+  });
+  // 3rd place
+  if (ev.thirdPlaceMatch && ev.thirdPlaceMatch.winner) {
+    parts.push('<rect x="' + PAD + '" y="' + y + '" width="' + (W - 2 * PAD) + '" height="60" rx="10" fill="rgba(184,134,11,.12)" stroke="#b8860b" stroke-width="1"/>');
+    parts.push('<text x="' + (W / 2) + '" y="' + (y + 38) + '" text-anchor="middle" font-family="sans-serif" font-size="24" font-weight="700" fill="#111111">🥉 3rd Place: ' + _xmlEsc(ev.thirdPlaceMatch.winner.name) + '</text>');
+    y += 80;
+  }
+  // Champion banner at the bottom
+  if (champ) {
+    var bandY = H - 280;
+    parts.push('<rect x="' + PAD + '" y="' + bandY + '" width="' + (W - 2 * PAD) + '" height="220" rx="16" fill="rgba(184,134,11,.14)" stroke="#b8860b" stroke-width="3"/>');
+    parts.push('<text x="' + (W / 2) + '" y="' + (bandY + 56) + '" text-anchor="middle" font-family="monospace" font-size="28" letter-spacing="10" font-weight="900" fill="#b8860b">🏆 CHAMPION</text>');
+    parts.push('<text x="' + (W / 2) + '" y="' + (bandY + 155) + '" text-anchor="middle" font-family="Impact, Anton, sans-serif" font-size="96" fill="#111111">' + _xmlEsc(champ.name) + '</text>');
+    if (champ.crew) parts.push('<text x="' + (W / 2) + '" y="' + (bandY + 200) + '" text-anchor="middle" font-family="sans-serif" font-size="26" font-weight="700" fill="#dc2626">' + _xmlEsc(champ.crew) + '</text>');
+  }
+  // Footer brand
+  parts.push('<text x="' + (W / 2) + '" y="' + (H - 30) + '" text-anchor="middle" font-family="monospace" font-size="20" letter-spacing="6" fill="#737373" font-weight="700">CYPHER NET</text>');
+  parts.push('</svg>');
+  return parts.join("");
+}
+function exportBracketImage(ev) {
+  if (typeof document === "undefined") return;
+  if (!ev || !ev.bracket || !ev.bracket.length) {
+    if (typeof bbToast === "function") bbToast("No bracket to export yet");
+    return;
+  }
+  var W = 1080, H = 1920;
+  var svgStr = buildBracketPosterSvg(ev);
+  var blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+  var url = URL.createObjectURL(blob);
+  var img = new Image();
+  img.onload = function () {
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#f4f4f3"; ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(img, 0, 0, W, H);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(function (pngBlob) {
+      if (!pngBlob) { if (typeof bbToast === "function") bbToast("Export failed"); return; }
+      var dlUrl = URL.createObjectURL(pngBlob);
+      var a = document.createElement("a");
+      a.href = dlUrl;
+      a.download = (ev.name || "bracket").replace(/[^a-z0-9]+/gi, "_") + "_bracket.png";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(dlUrl); }, 200);
+      if (typeof bbToast === "function") bbToast("Bracket image downloaded");
+    }, "image/png");
+  };
+  img.onerror = function () {
+    URL.revokeObjectURL(url);
+    if (typeof bbToast === "function") bbToast("Export failed (SVG render error)");
+  };
+  img.src = url;
+}
+
 function mkB(seeded, sz) {
   var s = sz || 1; while (s < seeded.length) s *= 2;
+  // Auto-downgrade Top 16 → Top 8 when fewer than 12 active competitors checked in.
+  if (s === 16 && seeded.length < 12) s = 8;
+  var order = SEED_ORDERS[s];
+  if (!order) { order = []; for (var k = 1; k <= s; k++) order.push(k); }
   var rn = Math.log2(s), b = [], r0 = [];
   for (var i = 0; i < s; i += 2) {
-    var p1 = seeded[i] || null, p2 = seeded[i + 1] || null;
+    var p1 = seeded[order[i] - 1] || null, p2 = seeded[order[i + 1] - 1] || null;
     r0.push({ p1: p1, p2: p2, winner: (p2 && p1) ? null : (p1 || p2), mid: "r0m" + (i / 2), rounds: [] });
   }
   b.push(r0);
@@ -657,12 +814,30 @@ function mkB(seeded, sz) {
     for (var j = 0; j < b[r - 1].length; j += 2) rd.push({ p1: null, p2: null, winner: null, mid: "r" + r + "m" + (j / 2), rounds: [] });
     b.push(rd);
   }
+  // Stamp nextMatchId / nextSlot so a winner write can route via match id (Supabase-friendly).
+  for (var rr = 0; rr < b.length; rr++)
+    for (var mm = 0; mm < b[rr].length; mm++) {
+      var nrr = rr + 1, nmm = Math.floor(mm / 2);
+      b[rr][mm].nextMatchId = (nrr < b.length) ? b[nrr][nmm].mid : null;
+      b[rr][mm].nextSlot = (nrr < b.length) ? (mm % 2 === 0 ? "p1" : "p2") : null;
+    }
   for (var r2 = 0; r2 < b.length; r2++)
     for (var m = 0; m < b[r2].length; m++) {
       var mt = b[r2][m];
       if (mt.winner && r2 + 1 < b.length) b[r2 + 1][Math.floor(m / 2)][m % 2 === 0 ? "p1" : "p2"] = mt.winner;
     }
   return b;
+}
+
+// Bronze match — populated from semifinal losers when ev.includeThirdPlace is on.
+function mkThirdPlace() {
+  return { p1: null, p2: null, winner: null, mid: "tpm", rounds: [] };
+}
+
+// Effective bracket size after auto-downgrade — for UI labels / tag display.
+function effectiveBracketSize(bs, entrantCount) {
+  if (bs === 16 && entrantCount < 12) return 8;
+  return bs;
 }
 
 function getRN(b, ri) {
@@ -820,6 +995,182 @@ function calcStats(events, extEvents, profiles, crews) {
 // ═══════════════════════════════════════════════════════════════
 function AppHead() { return (<><link href={FONT_URL} rel="stylesheet" /><style>{GCSS}</style></>) }
 
+// Small footer used at the bottom of public embeds.
+// - "CYPHER NET ↗" — drives traffic back to the main site.
+// - "🔑 Sign in" — opens main site sign-in flow at the top level so the
+//   Supabase OAuth handshake isn't blocked by Squarespace iframe / 3p-cookie
+//   policies. target="_top" breaks out when iframed; opens normally otherwise.
+function EmbedAttrib() {
+  var origin = typeof window !== "undefined" ? window.location.origin : "";
+  var linkStyle = {
+    fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)",
+    textDecoration: "none", letterSpacing: ".18em", fontWeight: 700
+  };
+  return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--b1)" }}>
+    <a href={origin + "/?signin=1"} target="_top" rel="noopener noreferrer" title="Sign in on Cypher Net" style={linkStyle}>🔑 SIGN IN</a>
+    <span style={{ color: "var(--b1)" }}>·</span>
+    <a href={origin} target="_top" rel="noopener noreferrer" title="Open Cypher Net" style={linkStyle}>CYPHER NET ↗</a>
+  </div>;
+}
+
+// SVG bracket tree — rounds become columns left → right, winners connected to
+// the next round's match by L-shaped tournament lines. Winner slot: gold fill +
+// gold border + bold + ✓ glyph. Loser: dimmed to 50%. Parent div allows
+// horizontal scroll for brackets wider than the iframe (Top 8 +).
+function CompactBracket(p) {
+  var ev = p.event;
+  var bk = ev && ev.bracket;
+
+  // Hooks must be called unconditionally — declare before any early return.
+  var scrollRef = useRef(null);
+  var totalWRef = useRef(0);
+  useEffect(function () {
+    if (scrollRef.current && totalWRef.current > scrollRef.current.clientWidth) {
+      scrollRef.current.scrollLeft = totalWRef.current;
+    }
+  }, [ev && ev.id]);
+
+  if (!bk || bk.length === 0) return null;
+
+  function trunc(s, n) { return s && s.length > n ? s.substring(0, n - 1) + "…" : (s || ""); }
+
+  // Layout constants — tuned for mobile readability while keeping Top 4 in 360px.
+  var MW = 122;       // match box width
+  var SH = 22;        // slot height (each match has 2 slots)
+  var MH = SH * 2;    // match box total height
+  var GAP_X = 26;     // horizontal gap between rounds (room for the lines)
+  var GAP_Y = 12;     // vertical gap between matches in round 0
+  var HEAD_H = 22;    // header zone for round labels
+
+  var nRounds = bk.length;
+
+  // Build positions per round. Round 0 is evenly spaced; each subsequent round's
+  // match j sits at the midpoint of the previous round's matches 2j and 2j+1.
+  var pos = [];
+  pos[0] = bk[0].map(function (_, i) {
+    return { x: 0, y: HEAD_H + i * (MH + GAP_Y) };
+  });
+  for (var r = 1; r < nRounds; r++) {
+    pos[r] = bk[r].map(function (_, j) {
+      var a = pos[r - 1][j * 2];
+      var b = pos[r - 1][j * 2 + 1] || a;
+      return { x: r * (MW + GAP_X), y: (a.y + b.y) / 2 };
+    });
+  }
+
+  var totalW = nRounds * MW + (nRounds - 1) * GAP_X;
+  var last0 = pos[0][pos[0].length - 1];
+  var totalH = last0.y + MH + 8;
+
+  // Stash totalW for the auto-scroll effect declared at the top of the function
+  // (hooks must be called unconditionally — see comment above).
+  totalWRef.current = totalW;
+
+  return <div ref={scrollRef} style={{ width: "100%", overflowX: "auto", overflowY: "hidden", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
+    <svg width={totalW} height={totalH} viewBox={"0 0 " + totalW + " " + totalH}
+         style={{ display: "block", fontFamily: "Epilogue" }}
+         role="img" aria-label={"Bracket — " + (ev.name || "event")}>
+
+      {/* Round labels along the top */}
+      {bk.map(function (_, r) {
+        return <text key={"hdr-" + r}
+          x={r * (MW + GAP_X) + MW / 2} y="13"
+          fontSize="9" fontFamily="JetBrains Mono" fontWeight="800"
+          fill="var(--dm)" textAnchor="middle" letterSpacing="1.4">
+          {getRN(bk, r).toUpperCase()}
+        </text>;
+      })}
+
+      {/* Connecting lines — drawn before boxes so boxes overlay the joins cleanly */}
+      {bk.map(function (round, r) {
+        if (r === 0) return null;
+        return round.map(function (_, j) {
+          var cur = pos[r][j];
+          var a = pos[r - 1][j * 2];
+          var b = pos[r - 1][j * 2 + 1];
+          if (!a || !b) return null;
+          var midX = a.x + MW + GAP_X / 2;
+          var ay = a.y + MH / 2;
+          var by = b.y + MH / 2;
+          var cy = cur.y + MH / 2;
+          // L-shape from each child's right edge → midX → cur's left edge.
+          var d1 = "M" + (a.x + MW) + " " + ay + " L" + midX + " " + ay + " L" + midX + " " + cy + " L" + cur.x + " " + cy;
+          var d2 = "M" + (b.x + MW) + " " + by + " L" + midX + " " + by + " L" + midX + " " + cy + " L" + cur.x + " " + cy;
+          return <g key={"ln-" + r + "-" + j} fill="none" stroke="var(--b1)" strokeWidth="1.5">
+            <path d={d1} />
+            <path d={d2} />
+          </g>;
+        });
+      })}
+
+      {/* Match boxes */}
+      {bk.map(function (round, r) {
+        return round.map(function (m, j) {
+          var box = pos[r][j];
+          var p1 = m.p1, p2 = m.p2, w = m.winner;
+          var p1Win = !!(w && p1 && w.id === p1.id);
+          var p2Win = !!(w && p2 && w.id === p2.id);
+          // Score tally (rounds won by each side) — surfaces on the right edge.
+          var rWon = 0, bWon = 0;
+          (m.rounds || []).forEach(function (rd) {
+            var vs = rd && rd.votes ? Object.values(rd.votes) : [];
+            var rC = vs.filter(function (v) { return v === "red"; }).length;
+            var bC = vs.filter(function (v) { return v === "blue"; }).length;
+            if (rC > bC) rWon++; else if (bC > rC) bWon++;
+          });
+          var hasScore = (rWon + bWon) > 0;
+
+          function slot(player, isWin, idx) {
+            var y = idx === 0 ? 0 : SH;
+            // Loser styling only applies when there's an actual player who lost
+            // — a BYE (null opponent against an auto-advancing winner) is not
+            // a defeat. Just show "BYE" with neutral styling.
+            var isLoser = !!(player && w && !isWin);
+            var isBye = !player && w;
+            var score = idx === 0 ? rWon : bWon;
+            var nameMax = hasScore ? 13 : 16;
+            var fill = isWin ? "var(--gd2)" : (isLoser ? "var(--c2)" : "var(--c1)");
+            var stroke = isWin ? "var(--gd)" : "var(--b1)";
+            var nameFill = isWin ? "var(--gd)" : (isLoser ? "var(--dm)" : (isBye ? "var(--dm)" : "var(--tx)"));
+            var label = player ? player.name : (isBye ? "BYE" : "TBD");
+            return <g>
+              <rect x="0" y={y} width={MW} height={SH}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth={isWin ? 1.5 : 1} />
+              <text x="8" y={y + 14}
+                    fontSize="11"
+                    fontWeight={isWin ? "800" : "600"}
+                    fill={nameFill}
+                    fontStyle={isBye ? "italic" : "normal"}
+                    style={isLoser ? { textDecoration: "line-through", textDecorationColor: "var(--b1)" } : null}>
+                {trunc(label, nameMax)}
+              </text>
+              {hasScore && <text x={MW - (isWin ? 18 : 8)} y={y + 14}
+                    fontSize="10" fontFamily="JetBrains Mono" fontWeight="700"
+                    fill={isWin ? "var(--gd)" : "var(--dm)"}
+                    textAnchor="end">
+                {score}
+              </text>}
+              {isWin && <text x={MW - 6} y={y + 14}
+                    fontSize="11" fontWeight="800" fill="var(--gd)" textAnchor="end">✓</text>}
+            </g>;
+          }
+
+          return <g key={m.mid || ("m-" + r + "-" + j)} transform={"translate(" + box.x + " " + box.y + ")"}>
+            {slot(p1, p1Win, 0)}
+            {slot(p2, p2Win, 1)}
+          </g>;
+        });
+      })}
+    </svg>
+    {totalW > 340 && <div style={{
+      fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)",
+      letterSpacing: ".12em", marginTop: 2, textAlign: "left", paddingLeft: 4
+    }}>← scroll for earlier rounds</div>}
+  </div>;
+}
+
 function Btn(p) {
   var m = {
     pri: { background: p.disabled ? "var(--b1)" : "var(--tx)", color: p.disabled ? "var(--dm)" : "#fff", border: "none" },
@@ -882,6 +1233,32 @@ function Crd(p) {
 // Dual-action score control — big number in the center with +/- nudge buttons (0.1 step)
 // and a coarse row of whole-number chips (0-10). Exported as `HeatSlider` to keep
 // existing callers working.
+// Personal round marker for judges — cycles through none / circle / square / star / skull.
+// Doesn't affect scoring. Stored on event.judgeMarkers[judgeSlot][playerId][roundIdx].
+var JUDGE_MARKER_CYCLE = [null, "circle", "square", "star", "skull"];
+var JUDGE_MARKER_GLYPH = { circle: "●", square: "■", star: "★", skull: "💀" };
+var JUDGE_MARKER_COLOR = { circle: "var(--ac)", square: "var(--jd)", star: "var(--gd)", skull: "var(--rd)" };
+function JudgeMarker(p) {
+  var m = p.marker || null;
+  var glyph = m ? JUDGE_MARKER_GLYPH[m] : "";
+  var col = m ? JUDGE_MARKER_COLOR[m] : "var(--dm)";
+  function onTap() {
+    var i = JUDGE_MARKER_CYCLE.indexOf(m);
+    var next = JUDGE_MARKER_CYCLE[(i + 1) % JUDGE_MARKER_CYCLE.length];
+    p.onCycle(next);
+  }
+  return <button onClick={onTap} title="Personal marker (tap to cycle) — doesn't affect scoring"
+    style={{
+      width: 28, height: 28, borderRadius: 99,
+      background: m ? "var(--c1)" : "transparent",
+      border: "1.5px " + (m ? "solid" : "dashed") + " " + col,
+      color: col, fontSize: m === "skull" ? 14 : 16, fontWeight: 800,
+      cursor: "pointer", flexShrink: 0, padding: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      touchAction: "manipulation"
+    }}>{glyph || "·"}</button>;
+}
+
 function HeatSlider(p) {
   var val = typeof p.value === "number" ? p.value : 0;
   if (val < 0) val = 0; if (val > 10) val = 10;
@@ -1434,6 +1811,107 @@ function LocationPicker(p) {
 // ═══════════════════════════════════════════════════════════════
 // PLAYER SEARCH (dropdown)
 // ═══════════════════════════════════════════════════════════════
+// Paste a list of names (one per line) — match against existing profiles or add as new.
+// Saves a lot of clicking when rolling a 16-breaker roster from a signup sheet.
+function BulkAddBreakers(p) {
+  var _open = useState(false), open = _open[0], setOpen = _open[1];
+  var _raw = useState(""), raw = _raw[0], setRaw = _raw[1];
+  var ev = p.ev;
+
+  // Parse pasted text → row per line with auto-match preview.
+  var rows = useMemo(function () {
+    if (!raw.trim()) return [];
+    var existingPids = {};
+    (ev.players || []).forEach(function (pl) { if (pl.pid) existingPids[pl.pid] = true; });
+    var existingNames = {};
+    (ev.players || []).forEach(function (pl) { existingNames[(pl.name || "").toLowerCase()] = true; });
+    return raw.split("\n").map(function (line) {
+      var name = line.trim();
+      if (!name) return null;
+      var lower = name.toLowerCase();
+      var match = (p.profiles || []).find(function (pr) {
+        var bn = (pr.breakingName || "").toLowerCase();
+        var fn = (pr.fullName || "").toLowerCase();
+        return !existingPids[pr.id] && (bn === lower || fn === lower || (bn && bn.includes(lower)) || (fn && fn.includes(lower)));
+      });
+      var dup = existingNames[lower];
+      return { name: name, match: match || null, dup: !!dup };
+    }).filter(Boolean);
+  }, [raw, ev.players, p.profiles]);
+
+  function commit() {
+    var added = 0;
+    p.upd(ev.id, function (d) {
+      rows.forEach(function (r) {
+        if (r.dup) return;
+        var id = "p" + Date.now() + "_" + added;
+        if (r.match) {
+          var prof = r.match;
+          d.players.push({
+            id: id, pid: prof.id, name: prof.breakingName,
+            crew: prof.crews && prof.crews.length > 0 ? prof.crews[0].name : "",
+            crewId: prof.primaryCrew, sn: d.players.length + 1
+          });
+        } else {
+          d.players.push({ id: id, name: r.name, crew: "", sn: d.players.length + 1 });
+        }
+        d.scores[id] = Array(MAX_J).fill(0);
+        added++;
+      });
+      return d;
+    });
+    setRaw(""); setOpen(false);
+    if (typeof bbToast === "function") bbToast("Added " + added + " breaker" + (added === 1 ? "" : "s"));
+  }
+
+  if (!open) {
+    return <div style={{ marginTop: 8, textAlign: "right" }}>
+      <button onClick={function () { setOpen(true); }} style={{
+        background: "transparent", border: "none", color: "var(--ac)",
+        fontSize: 11, fontFamily: "JetBrains Mono", letterSpacing: ".08em",
+        cursor: "pointer", padding: "4px 6px", fontWeight: 700, touchAction: "manipulation"
+      }}>+ BULK ADD FROM LIST</button>
+    </div>;
+  }
+
+  var matched = rows.filter(function (r) { return r.match && !r.dup; }).length;
+  var newOnes = rows.filter(function (r) { return !r.match && !r.dup; }).length;
+  var dups = rows.filter(function (r) { return r.dup; }).length;
+
+  return <Crd sx={{ marginTop: 10, borderColor: "var(--ac)", borderWidth: 1 }}>
+    <Lbl>📋 Bulk Add Breakers</Lbl>
+    <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 8, lineHeight: 1.4 }}>
+      Paste one breaker name per line. Existing profiles auto-match; unmatched names become new breakers.
+    </div>
+    <TArea value={raw} onChange={setRaw} rows={6} placeholder={"Bgirl Emma\nSid Beat\nBboy Faucet\n…"} />
+    {rows.length > 0 && <div style={{ marginTop: 10, padding: 10, background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8 }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".1em", marginBottom: 6 }}>
+        PREVIEW · <span style={{ color: "var(--gn)" }}>{matched} MATCHED</span> · <span style={{ color: "var(--ac)" }}>{newOnes} NEW</span>{dups > 0 && <span style={{ color: "var(--rd)" }}> · {dups} DUPLICATE</span>}
+      </div>
+      <div style={{ maxHeight: 200, overflowY: "auto" }}>
+        {rows.map(function (r, i) {
+          return <div key={i} style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "4px 6px",
+            fontSize: 12, fontFamily: "Epilogue", borderBottom: i < rows.length - 1 ? "1px solid var(--b1)" : "none",
+            color: r.dup ? "var(--rd)" : "var(--tx)", opacity: r.dup ? 0.55 : 1
+          }}>
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+            <span style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: r.dup ? "var(--rd)" : r.match ? "var(--gn)" : "var(--ac)", fontWeight: 800, letterSpacing: ".06em" }}>
+              {r.dup ? "ALREADY IN ROSTER" : r.match ? "→ " + (r.match.breakingName || r.match.fullName) : "+ NEW"}
+            </span>
+          </div>;
+        })}
+      </div>
+    </div>}
+    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+      <Btn v="gh" onClick={function () { setOpen(false); setRaw(""); }} sx={{ flex: 1, fontSize: 12 }}>Cancel</Btn>
+      <Btn v="gn" onClick={commit} disabled={rows.length === 0 || (matched + newOnes === 0)} sx={{ flex: 2, fontSize: 12 }}>
+        Add {matched + newOnes} Breaker{(matched + newOnes) === 1 ? "" : "s"}
+      </Btn>
+    </div>
+  </Crd>;
+}
+
 function PlayerSearch(p) {
   var _s = useState(""), q = _s[0], setQ = _s[1];
   var _o = useState(false), open = _o[0], setOpen = _o[1];
@@ -2599,6 +3077,8 @@ function PlayerEditor(p) {
         });
       }} disabled={!fn.trim() || !bn.trim()} sx={{ width: "100%" }}>{isNew ? "Add Breaker" : "Save"}</Btn>
     </Crd>
+    {!isNew && p.onMerge && <ProfileMergeSection profile={pr} allProfiles={p.allProfiles || []} onMerge={p.onMerge} />}
+
     {!isNew && p.onDelete && <Crd sx={{ marginTop: 18, borderColor: "var(--rd)", borderWidth: 1 }}>
       <Lbl>Danger Zone</Lbl>
       <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10 }}>
@@ -2607,6 +3087,72 @@ function PlayerEditor(p) {
       <Btn v="dg" onClick={function () { p.onDelete(pr.id); }} sx={{ width: "100%", fontSize: 12 }}>Delete Breaker</Btn>
     </Crd>}
   </div>);
+}
+
+// Merge another breaker INTO this one. Re-keys event roster entries, external events,
+// Round-of-the-Night awards, and Cypher King designations from the secondary to the
+// primary. The secondary profile is removed. The merge is irreversible — confirmation
+// required.
+function ProfileMergeSection(p) {
+  var primary = p.profile;
+  var _sel = useState(""), secId = _sel[0], setSecId = _sel[1];
+  var _open = useState(false), open = _open[0], setOpen = _open[1];
+
+  var candidates = (p.allProfiles || []).filter(function (x) { return x.id !== primary.id && !x.archived; });
+  var secondary = candidates.find(function (x) { return x.id === secId; }) || null;
+
+  if (!open) {
+    return <div style={{ marginTop: 12, textAlign: "right" }}>
+      <button onClick={function () { setOpen(true); }} style={{
+        background: "transparent", border: "none", color: "var(--ac)",
+        fontSize: 11, fontFamily: "JetBrains Mono", letterSpacing: ".08em",
+        cursor: "pointer", padding: "4px 6px", fontWeight: 700, touchAction: "manipulation"
+      }}>🔀 MERGE ANOTHER PROFILE INTO THIS ONE</button>
+    </div>;
+  }
+
+  return <Crd sx={{ marginTop: 12, borderColor: "var(--gd)", borderWidth: 1 }}>
+    <Lbl>🔀 Merge Duplicate Profile</Lbl>
+    <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10, lineHeight: 1.45 }}>
+      Pick another breaker to merge <b>into</b> <span style={{ color: "var(--tx)" }}>{primary.breakingName || primary.fullName}</span>. All their event placements, external event entries, Round-of-the-Night awards, and Cypher King designations will be re-keyed to this profile. The other profile gets deleted. <b>One-way action</b>.
+    </div>
+    <Lbl>Secondary (gets merged + deleted)</Lbl>
+    <select value={secId} onChange={function (e) { setSecId(e.target.value); }} style={{
+      width: "100%", padding: 10, borderRadius: 7, background: "var(--c1)",
+      color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue", marginBottom: 10
+    }}>
+      <option value="">— Select another profile —</option>
+      {candidates.slice().sort(function (a, b) {
+        return (a.breakingName || a.fullName || "").localeCompare(b.breakingName || b.fullName || "");
+      }).map(function (cp) {
+        return <option key={cp.id} value={cp.id}>{(cp.breakingName || cp.fullName) + (cp.fullName && cp.fullName !== cp.breakingName ? " (" + cp.fullName + ")" : "")}</option>;
+      })}
+    </select>
+
+    {secondary && <div style={{ padding: 10, background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8, marginBottom: 10 }}>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".08em", marginBottom: 6 }}>
+        ABOUT TO MERGE
+      </div>
+      <div style={{ fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)", marginBottom: 4 }}>
+        <span style={{ fontWeight: 700, color: "var(--rd)" }}>{secondary.breakingName || secondary.fullName}</span>
+        <span style={{ color: "var(--dm)" }}> → </span>
+        <span style={{ fontWeight: 700, color: "var(--gn)" }}>{primary.breakingName || primary.fullName}</span>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--dm)" }}>
+        Secondary's full name: {secondary.fullName || "—"} · Crews: {(secondary.crews || []).map(function (c) { return c.name; }).join(", ") || "—"}
+      </div>
+    </div>}
+
+    <div style={{ display: "flex", gap: 6 }}>
+      <Btn v="gh" onClick={function () { setOpen(false); setSecId(""); }} sx={{ flex: 1, fontSize: 12 }}>Cancel</Btn>
+      <Btn v="gd" onClick={function () {
+        if (!secondary) return;
+        if (!confirm("Merge " + (secondary.breakingName || secondary.fullName) + " INTO " + (primary.breakingName || primary.fullName) + "?\n\nAll event placements, ROTN awards, and external event entries will be re-keyed. The secondary profile will be deleted. This cannot be undone.")) return;
+        p.onMerge(primary.id, secondary.id);
+        setOpen(false); setSecId("");
+      }} disabled={!secondary} sx={{ flex: 2, fontSize: 12 }}>Merge &amp; Delete Secondary</Btn>
+    </div>
+  </Crd>;
 }
 
 function CrewEditor(p) {
@@ -3364,20 +3910,57 @@ function LeaderboardDashboard(p) {
   var cityR = (p.cityR || []).slice().sort(function (a, b) { return (b.dpr || 0) - (a.dpr || 0); });
   var countryR = (p.countryR || []).slice().sort(function (a, b) { return (b.dpr || 0) - (a.dpr || 0); });
 
-  // KPI numbers
-  var totalBreakers = pR.filter(function (x) { return (x.dpr || 0) > 0 || (x.eventsAttended || 0) > 0; }).length;
-  var totalCrews = cR.filter(function (x) { return (x.dpr || 0) > 0 || (x.eventsCount || 0) > 0; }).length;
+  // KPI numbers — "active" metrics are scoped to the last 6 months. Other metrics use the
+  // dashboard's own time filter (handled upstream in fStats).
+  var ACTIVE_MS = 180 * 86400000;
+  var nowMs = Date.now();
+  var eventsActive = (p.events || []).filter(function (e) {
+    if (!e.dt) return false;
+    var t = new Date(e.dt).getTime();
+    return !isNaN(t) && (nowMs - t) <= ACTIVE_MS;
+  });
+  var activeBreakerIds = {};
+  var activeBGirlIds = {};
+  var activeYouthIds = {};
+  var activeCrewIds = {};
+  eventsActive.forEach(function (e) {
+    (e.players || []).forEach(function (pl) {
+      if (pl.pid) {
+        activeBreakerIds[pl.pid] = true;
+        var pr = (p.profiles || []).find(function (x) { return x.id === pl.pid; });
+        if (pr) {
+          if ((pr.labels || []).indexOf("BGirl") >= 0) activeBGirlIds[pl.pid] = true;
+          if ((pr.labels || []).indexOf("Youth") >= 0) activeYouthIds[pl.pid] = true;
+        }
+      }
+      if (pl.crewId) activeCrewIds[pl.crewId] = true;
+    });
+  });
+  var totalActiveBreakers = Object.keys(activeBreakerIds).length;
+  var totalActiveBGirls = Object.keys(activeBGirlIds).length;
+  var totalActiveYouth = Object.keys(activeYouthIds).length;
+  var totalActiveCrews = Object.keys(activeCrewIds).length;
   var totalEvents = (p.events || []).length;
-  var totalMatches = 0;
+  var totalBattlesRun = 0;
   (p.events || []).forEach(function (e) {
     (e.bracket || []).forEach(function (rd) {
-      (rd || []).forEach(function (m) { if (m && m.p1 && m.p2) totalMatches++; });
+      (rd || []).forEach(function (m) { if (m && m.winner) totalBattlesRun++; });
     });
   });
 
-  // Derived lists
-  var top5Breakers = pR.filter(function (x) { return (x.dpr || 0) > 0; }).slice(0, 5);
-  var top5Crews = cR.filter(function (x) { return (x.dpr || 0) > 0; }).slice(0, 5);
+  // Derived lists — sorted by WINS first (true 1st-place finishes), then events as tiebreak.
+  var top5Breakers = pR.filter(function (x) { return (x.wins || 0) > 0 || (x.eventsAttended || 0) > 0; })
+    .slice().sort(function (a, b) {
+      var dw = (b.wins || 0) - (a.wins || 0);
+      if (dw !== 0) return dw;
+      return (b.eventsAttended || 0) - (a.eventsAttended || 0);
+    }).slice(0, 5);
+  var top5Crews = cR.filter(function (x) { return (x.wins || 0) > 0 || (x.eventsCount || 0) > 0; })
+    .slice().sort(function (a, b) {
+      var dw = (b.wins || 0) - (a.wins || 0);
+      if (dw !== 0) return dw;
+      return (b.eventsCount || 0) - (a.eventsCount || 0);
+    }).slice(0, 5);
   var kings = pR.filter(function (x) { return (x.cypherKings || 0) > 0; })
     .sort(function (a, b) { return (b.cypherKings || 0) - (a.cypherKings || 0); }).slice(0, 5);
   var totalKingCrowns = pR.reduce(function (s, x) { return s + (x.cypherKings || 0); }, 0);
@@ -3393,13 +3976,18 @@ function LeaderboardDashboard(p) {
   var mostActiveCrews = cR.filter(function (x) { return (x.eventsCount || 0) > 0; })
     .slice().sort(function (a, b) { return (b.eventsCount || 0) - (a.eventsCount || 0); }).slice(0, 5);
 
-  // Label-filtered leaderboards
+  // Label-filtered leaderboards — same wins-first sort.
+  function sortByWinsThenEvents(a, b) {
+    var dw = (b.wins || 0) - (a.wins || 0);
+    if (dw !== 0) return dw;
+    return (b.eventsAttended || 0) - (a.eventsAttended || 0);
+  }
   var topBGirls = pR.filter(function (x) {
-    return (x.labels || []).indexOf("BGirl") >= 0 && (x.dpr || 0) > 0;
-  }).slice(0, 5);
+    return (x.labels || []).indexOf("BGirl") >= 0 && ((x.wins || 0) > 0 || (x.eventsAttended || 0) > 0);
+  }).slice().sort(sortByWinsThenEvents).slice(0, 5);
   var topYouth = pR.filter(function (x) {
-    return (x.labels || []).indexOf("Youth") >= 0 && (x.dpr || 0) > 0;
-  }).slice(0, 5);
+    return (x.labels || []).indexOf("Youth") >= 0 && ((x.wins || 0) > 0 || (x.eventsAttended || 0) > 0);
+  }).slice().sort(sortByWinsThenEvents).slice(0, 5);
 
   // Outside-BC wins: count placements where the source event is outside British Columbia
   // Use ev.details.state for app events; extEvents fall through (we don't have full geo on them)
@@ -3482,30 +4070,45 @@ function LeaderboardDashboard(p) {
     var r = props.rank;
     var u = props.u;
     var displayName = u.breakingName || u.name;
+    // Relative magnitude bar — encodes comparison without relying on color.
+    // pct is 0..100; bar length scales linearly. Hidden if pct missing.
+    var pct = typeof props.pct === "number" ? Math.max(0, Math.min(100, props.pct)) : null;
+    var barColor = props.valColor || "var(--ac)";
     return <div style={{
-      display: "flex", alignItems: "center", gap: 8, padding: "6px 0",
+      padding: "6px 0",
       borderBottom: props.last ? "none" : "1px solid var(--b2)"
     }}>
-      <span style={{
-        fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 800,
-        color: r === 1 ? "var(--gd)" : r === 2 ? "#9ca3af" : r === 3 ? "#cd7f32" : "var(--dm)",
-        minWidth: 22
-      }}>{"#" + r}</span>
-      <Av name={displayName} sz={22} isCrew={!!props.isCrew} />
-      <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-        <div style={{
-          fontSize: 12, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-        }}>{displayName}</div>
-        {props.sub && <div style={{
-          fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-        }}>{props.sub}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{
+          fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 800,
+          color: r === 1 ? "var(--gd)" : r === 2 ? "#9ca3af" : r === 3 ? "#cd7f32" : "var(--dm)",
+          minWidth: 22
+        }}>{"#" + r}</span>
+        <Av name={displayName} sz={22} isCrew={!!props.isCrew} />
+        <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <div style={{
+            fontSize: 12, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+          }}>{displayName}</div>
+          {props.sub && <div style={{
+            fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+          }}>{props.sub}</div>}
+        </div>
+        <span style={{
+          fontSize: 13, fontWeight: 800, fontFamily: "JetBrains Mono", color: props.valColor || "var(--tx)",
+          flexShrink: 0
+        }}>{props.value}</span>
       </div>
-      <span style={{
-        fontSize: 13, fontWeight: 800, fontFamily: "JetBrains Mono", color: props.valColor || "var(--tx)",
-        flexShrink: 0
-      }}>{props.value}</span>
+      {pct !== null && <div style={{
+        marginTop: 4, marginLeft: 30, height: 3, background: "var(--b2)",
+        borderRadius: 2, overflow: "hidden"
+      }}>
+        <div style={{
+          width: pct + "%", height: "100%", background: barColor,
+          transition: "width .3s ease"
+        }} aria-hidden="true" />
+      </div>}
     </div>;
   }
 
@@ -3529,67 +4132,94 @@ function LeaderboardDashboard(p) {
   var gridCols = compact ? "repeat(auto-fit,minmax(220px,1fr))" : "repeat(auto-fit,minmax(280px,1fr))";
 
   return <div style={{ animation: "fu .3s ease" }}>
-    {/* Hero KPI row */}
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--b1)", border: "1px solid var(--b1)", marginBottom: 12 }}>
-      <KpiCard label="BREAKERS" value={totalBreakers} color="var(--ac)" />
-      <KpiCard label="CREWS" value={totalCrews} color="var(--cr)" />
-      <KpiCard label="EVENTS" value={totalEvents} color="var(--jd)" />
-      <KpiCard label="MATCHES" value={totalMatches} color="var(--gn)" />
+    {/* Hero KPI strip — 2 rows × 3 cols on mobile. "Active" metrics scoped to last 6 months. */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--b1)", border: "1px solid var(--b1)", marginBottom: 12 }}>
+      <KpiCard label="ACTIVE BREAKERS" sub="6 MO" value={totalActiveBreakers} color="var(--ac)" />
+      <KpiCard label="ACTIVE BGIRLS" sub="6 MO" value={totalActiveBGirls} color="var(--cr)" />
+      <KpiCard label="ACTIVE YOUTH" sub="6 MO" value={totalActiveYouth} color="var(--jd)" />
+      <KpiCard label="ACTIVE CREWS" sub="6 MO" value={totalActiveCrews} color="var(--gn)" />
+      <KpiCard label="EVENTS" value={totalEvents} color="var(--gd)" />
+      <KpiCard label="BATTLES RUN" value={totalBattlesRun} color="var(--tx)" />
     </div>
 
     {/* Card grid */}
     <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 10 }}>
       {/* Top 5 Breakers */}
-      <Card title="TOP BREAKERS" subtitle="BY DPR" delay={0.05}>
+      <Card title="TOP BREAKERS" subtitle="BY WINS" delay={0.05}>
         {top5Breakers.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
-          : top5Breakers.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u}
-              sub={u.city || u.country}
-              value={u.dpr || 0} valColor="var(--gd)" last={i === top5Breakers.length - 1} />;
-          })}
+          : (function () {
+            var mx = top5Breakers[0].wins || 1;
+            return top5Breakers.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u}
+                sub={(u.eventsAttended || 0) + " events" + (u.city ? " · " + u.city : "")}
+                value={u.wins || 0} valColor="var(--gd)"
+                pct={((u.wins || 0) / mx) * 100}
+                last={i === top5Breakers.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* Top 5 Crews */}
-      <Card title="TOP CREWS" subtitle="BY DPR" delay={0.08}>
+      <Card title="TOP CREWS" subtitle="BY WINS" delay={0.08}>
         {top5Crews.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
-          : top5Crews.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u} isCrew
-              sub={(u.eventsCount || 0) + " events · " + (u.wins || 0) + " wins"}
-              value={u.dpr || 0} valColor="var(--cr)" last={i === top5Crews.length - 1} />;
-          })}
+          : (function () {
+            var mx = top5Crews[0].wins || 1;
+            return top5Crews.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u} isCrew
+                sub={(u.eventsCount || 0) + " events"}
+                value={u.wins || 0} valColor="var(--cr)"
+                pct={((u.wins || 0) / mx) * 100}
+                last={i === top5Crews.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* Cypher Kings */}
       <Card title="CYPHER KINGS" subtitle={"× " + totalKingCrowns + " CROWNS"} delay={0.11}>
         {kings.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No kings crowned yet.</div>
-          : kings.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u}
-              sub={u.city || u.country}
-              value={"× " + (u.cypherKings || 0)} valColor="var(--gd)" last={i === kings.length - 1} />;
-          })}
+          : (function () {
+            var mx = kings[0].cypherKings || 1;
+            return kings.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u}
+                sub={u.city || u.country}
+                value={"× " + (u.cypherKings || 0)} valColor="var(--gd)"
+                pct={((u.cypherKings || 0) / mx) * 100}
+                last={i === kings.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* On Fire / Streaks */}
       <Card title="ON FIRE" subtitle="LAST 5 EVENTS" delay={0.14}>
         {onFire.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No active streaks.</div>
-          : onFire.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u}
-              sub={u.city || u.country}
-              value={u._w + " W"} valColor="var(--rd)" last={i === onFire.length - 1} />;
-          })}
+          : (function () {
+            var mx = onFire[0]._w || 1;
+            return onFire.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u}
+                sub={u.city || u.country}
+                value={u._w + " W"} valColor="var(--rd)"
+                pct={(u._w / mx) * 100}
+                last={i === onFire.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* Top Judges */}
       <Card title="TOP JUDGES" subtitle="BY EVENT COUNT" delay={0.17}>
         {topJudges.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No judges recorded.</div>
-          : topJudges.map(function (j, i) {
-            return <MiniRow key={j.name} rank={i + 1} u={{ name: j.name }}
-              sub={null} value={j.events + " ev"} valColor="var(--jd)" last={i === topJudges.length - 1} />;
-          })}
+          : (function () {
+            var mx = topJudges[0].events || 1;
+            return topJudges.map(function (j, i) {
+              return <MiniRow key={j.name} rank={i + 1} u={{ name: j.name }}
+                sub={null} value={j.events + " ev"} valColor="var(--jd)"
+                pct={(j.events / mx) * 100}
+                last={i === topJudges.length - 1} />;
+            });
+          })()}
       </Card>
 
-      {/* Top Cities — Vancouver-area focus, top 4 cities by DPR */}
-      <Card title="TOP CITIES" subtitle="BY DPR" delay={0.20}>
+      {/* Top Cities — Vancouver-area focus, top 4 cities by BREAKER COUNT */}
+      <Card title="TOP CITIES" subtitle="BY DANCERS" delay={0.20}>
         {cityR.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No regional data.</div>
           : cityR.slice(0, 5).map(function (c, i) {
             // Strip country suffix for cleaner display since this is Vancouver-area focused
@@ -3614,7 +4244,7 @@ function LeaderboardDashboard(p) {
               </div>
               <span style={{
                 fontSize: 13, fontWeight: 800, fontFamily: "JetBrains Mono", color: "var(--gd)", flexShrink: 0
-              }}>{c.dpr || 0}</span>
+              }}>{c.players || 0}</span>
             </div>;
           })}
       </Card>
@@ -3662,51 +4292,76 @@ function LeaderboardDashboard(p) {
       {/* Most active breakers */}
       <Card title="MOST ACTIVE" subtitle="BY EVENT COUNT" delay={0.29}>
         {mostActiveBreakers.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
-          : mostActiveBreakers.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u}
-              sub={u.city || u.country}
-              value={u.eventsAttended + " ev"} valColor="var(--ac)" last={i === mostActiveBreakers.length - 1} />;
-          })}
+          : (function () {
+            var mx = mostActiveBreakers[0].eventsAttended || 1;
+            return mostActiveBreakers.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u}
+                sub={u.city || u.country}
+                value={u.eventsAttended + " ev"} valColor="var(--ac)"
+                pct={((u.eventsAttended || 0) / mx) * 100}
+                last={i === mostActiveBreakers.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* Most active crews */}
       <Card title="MOST ACTIVE CREWS" subtitle="BY EVENTS REP'D" delay={0.32}>
         {mostActiveCrews.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No data yet.</div>
-          : mostActiveCrews.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u} isCrew
-              sub={(u.wins || 0) + " wins · " + (u.winPct || 0) + "% rate"}
-              value={u.eventsCount + " ev"} valColor="var(--cr)" last={i === mostActiveCrews.length - 1} />;
-          })}
+          : (function () {
+            var mx = mostActiveCrews[0].eventsCount || 1;
+            return mostActiveCrews.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u} isCrew
+                sub={(u.wins || 0) + " wins · " + (u.winPct || 0) + "% rate"}
+                value={u.eventsCount + " ev"} valColor="var(--cr)"
+                pct={((u.eventsCount || 0) / mx) * 100}
+                last={i === mostActiveCrews.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* Top BGirls */}
-      <Card title="TOP BGIRLS" subtitle="BY DPR" delay={0.35}>
-        {topBGirls.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No BGirls scored yet.</div>
-          : topBGirls.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u}
-              sub={u.city || u.country}
-              value={u.dpr || 0} valColor="var(--gd)" last={i === topBGirls.length - 1} />;
-          })}
+      <Card title="TOP BGIRLS" subtitle="BY WINS" delay={0.35}>
+        {topBGirls.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No BGirls yet.</div>
+          : (function () {
+            var mx = topBGirls[0].wins || 1;
+            return topBGirls.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u}
+                sub={(u.eventsAttended || 0) + " events" + (u.city ? " · " + u.city : "")}
+                value={u.wins || 0} valColor="var(--gd)"
+                pct={((u.wins || 0) / mx) * 100}
+                last={i === topBGirls.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* Top Youth */}
-      <Card title="TOP YOUTH" subtitle="BY DPR" delay={0.38}>
-        {topYouth.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No Youth scored yet.</div>
-          : topYouth.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u}
-              sub={u.city || u.country}
-              value={u.dpr || 0} valColor="var(--gd)" last={i === topYouth.length - 1} />;
-          })}
+      <Card title="TOP YOUTH" subtitle="BY WINS" delay={0.38}>
+        {topYouth.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No Youth yet.</div>
+          : (function () {
+            var mx = topYouth[0].wins || 1;
+            return topYouth.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u}
+                sub={(u.eventsAttended || 0) + " events" + (u.city ? " · " + u.city : "")}
+                value={u.wins || 0} valColor="var(--gd)"
+                pct={((u.wins || 0) / mx) * 100}
+                last={i === topYouth.length - 1} />;
+            });
+          })()}
       </Card>
 
       {/* Outside BC Wins — repping the Vancouver scene abroad */}
       <Card title="REPPING ABROAD" subtitle="WINS OUTSIDE BC" delay={0.41}>
         {outsideBCBreakers.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>No out-of-province wins recorded.</div>
-          : outsideBCBreakers.map(function (u, i) {
-            return <MiniRow key={u.id} rank={i + 1} u={u}
-              sub={u.city || u.country}
-              value={u._outWins + (u._outWins === 1 ? " win" : " wins")} valColor="var(--rd)" last={i === outsideBCBreakers.length - 1} />;
-          })}
+          : (function () {
+            var mx = outsideBCBreakers[0]._outWins || 1;
+            return outsideBCBreakers.map(function (u, i) {
+              return <MiniRow key={u.id} rank={i + 1} u={u}
+                sub={u.city || u.country}
+                value={u._outWins + (u._outWins === 1 ? " win" : " wins")} valColor="var(--rd)"
+                pct={(u._outWins / mx) * 100}
+                last={i === outsideBCBreakers.length - 1} />;
+            });
+          })()}
       </Card>
     </div>
 
@@ -3775,6 +4430,1967 @@ function useEmbedHeight(deps) {
     }, 50); // tiny delay so animation-driven layout settles first
     return function () { clearTimeout(t); };
   }, deps || []);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIVE EVENT EMBED (?embed=live-event)
+// ═══════════════════════════════════════════════════════════════
+// State machine for one event:
+//   upcoming → prelims → bracket → champion → closed
+// Realtime updates flow through the app-level user_data subscription;
+// this component reads from props.events and rerenders on each Realtime push.
+
+var LIVE_GRACE_MS = 24 * 60 * 60 * 1000; // 24h champion display window
+
+function liveEventState(ev) {
+  if (!ev) return { kind: "none" };
+  var now = Date.now();
+  var start = ev.dt ? new Date(ev.dt).getTime() : 0;
+  var bracket = ev.bracket;
+  var finalMatch = bracket && bracket.length ? bracket[bracket.length - 1][0] : null;
+  var champion = finalMatch && finalMatch.winner;
+  if (champion) {
+    var anchor = ev.championDeclaredAt ? new Date(ev.championDeclaredAt).getTime()
+               : ev.endTime ? new Date(ev.endTime).getTime()
+               : (start ? start + 8 * 60 * 60 * 1000 : now);
+    if (now > anchor + LIVE_GRACE_MS) return { kind: "closed" };
+    return { kind: "champion", champion: champion, anchor: anchor };
+  }
+  if (bracket) return { kind: "bracket" };
+  if (start && start <= now) return { kind: "prelims" };
+  if (start && start > now) return { kind: "upcoming", msUntil: start - now };
+  return { kind: "none" };
+}
+
+// Auto-pick the event most worth featuring right now.
+// Priority: bracket-running > prelims > upcoming (soonest first) > recent champion.
+function pickLiveEvent(events) {
+  if (!events || events.length === 0) return null;
+  var scored = events.map(function (e) {
+    var s = liveEventState(e);
+    var rank = 99;
+    if (s.kind === "bracket") rank = 0;
+    else if (s.kind === "prelims") rank = 1;
+    else if (s.kind === "upcoming") rank = 2;
+    else if (s.kind === "champion") rank = 3;
+    return { e: e, s: s, rank: rank };
+  }).filter(function (x) { return x.rank < 99; });
+  if (scored.length === 0) return null;
+  scored.sort(function (a, b) {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    var aT = a.e.dt ? new Date(a.e.dt).getTime() : Infinity;
+    var bT = b.e.dt ? new Date(b.e.dt).getTime() : Infinity;
+    return aT - bT;
+  });
+  return scored[0];
+}
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return "starting now";
+  var s = Math.floor(ms / 1000);
+  var d = Math.floor(s / 86400); s -= d * 86400;
+  var h = Math.floor(s / 3600); s -= h * 3600;
+  var m = Math.floor(s / 60); s -= m * 60;
+  if (d > 0) return d + "d " + h + "h " + m + "m";
+  if (h > 0) return h + "h " + m + "m";
+  if (m > 0) return m + "m " + s + "s";
+  return s + "s";
+}
+
+function LiveEventEmbed(p) {
+  var cfg = p.config;
+  var events = p.events || [];
+  var profiles = p.profiles || [];
+  var crews = p.crews || [];
+
+  // 30s tick keeps countdown / state transitions live without waiting on Realtime.
+  var _tick = useState(0), tick = _tick[0], setTick = _tick[1];
+  // Which bracket match is expanded to show per-round score breakdown.
+  var _exp = useState(null), expandedMid = _exp[0], setExpandedMid = _exp[1];
+  // User-selected round to view (null = auto-tracks the current playing round).
+  var _vr = useState(null), viewingRoundIdx = _vr[0], setViewingRoundIdx = _vr[1];
+  useEffect(function () {
+    var iv = setInterval(function () { setTick(function (t) { return t + 1; }); }, 30000);
+    return function () { clearInterval(iv); };
+  }, []);
+
+  // Resolve the event (specific via ?event=, else auto-pick).
+  var ev = useMemo(function () {
+    if (cfg.eventId) return events.find(function (e) { return e.id === cfg.eventId; }) || null;
+    var pick = pickLiveEvent(events);
+    return pick ? pick.e : null;
+  }, [events, cfg.eventId, tick]);
+
+  var state = useMemo(function () { return liveEventState(ev); }, [ev, tick]);
+
+  useEmbedHeight([ev && ev.id, state.kind, (ev && ev.bracket) ? ev.bracket.length : 0, expandedMid, viewingRoundIdx]);
+
+  if (!ev || state.kind === "none" || state.kind === "closed") {
+    return <div style={Object.assign({}, CV, {
+      minHeight: 120, background: "var(--bg)", padding: 18,
+      fontFamily: "Epilogue", color: "var(--dm)", fontSize: 13, textAlign: "center"
+    })}>
+      <AppHead />
+      <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, letterSpacing: ".15em", color: "var(--dm)", marginBottom: 6 }}>CYPHER NET — LIVE</div>
+      No live events right now. Check back soon.
+    </div>;
+  }
+
+  var crewName = function (player) {
+    if (!player) return "";
+    var pid = player.pid;
+    var pr = pid ? profiles.find(function (x) { return x.id === pid; }) : null;
+    if (pr && pr.primaryCrew) {
+      var cr = crews.find(function (c) { return c.id === pr.primaryCrew; });
+      if (cr) return cr.name;
+    }
+    return player.crew || "";
+  };
+
+  var pulse = { animation: "pulse 1.6s ease-in-out infinite" };
+
+  // ── HEADER (shared across states) ─────────────────────────────
+  var header = <div style={{ marginBottom: 14 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 5,
+        padding: "3px 8px", borderRadius: 99,
+        background: state.kind === "upcoming" ? "var(--c2)" : "var(--rd2)",
+        border: "1px solid " + (state.kind === "upcoming" ? "var(--b1)" : "var(--rd)"),
+        color: state.kind === "upcoming" ? "var(--dm)" : "var(--rd)",
+        fontSize: 10, fontFamily: "JetBrains Mono", fontWeight: 800, letterSpacing: ".12em"
+      }} {...(state.kind !== "upcoming" ? { } : {})}>
+        <span style={state.kind === "upcoming" ? {} : pulse}>{state.kind === "upcoming" ? "◆" : "●"}</span>
+        {state.kind === "upcoming" ? "STARTING SOON"
+          : state.kind === "prelims" ? "PRELIMS LIVE"
+          : state.kind === "bracket" ? "BRACKET LIVE"
+          : "CHAMPION"}
+      </span>
+      {ev.dt && <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{fmtD(ev.dt)}</span>}
+    </div>
+    <h2 style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 26, fontWeight: 400, letterSpacing: ".02em",
+      color: "var(--tx)", margin: "0 0 4px", lineHeight: 1.05 }}>{ev.name}</h2>
+    {ev.details && (ev.details.venueName || ev.details.city) && <div style={{ fontSize: 12, color: "var(--dm)", fontFamily: "Epilogue" }}>
+      {[ev.details.venueName, ev.details.city, ev.details.country].filter(Boolean).join(" · ")}
+    </div>}
+  </div>;
+
+  // ── UPCOMING ─────────────────────────────────────────────────
+  if (state.kind === "upcoming") {
+    return <div style={Object.assign({}, CV, { background: "var(--bg)", padding: 18, fontFamily: "Epilogue" })}>
+      <AppHead />
+      {header}
+      <div style={{
+        padding: "18px 16px", background: "var(--c2)", borderRadius: 12,
+        border: "1px solid var(--b1)", textAlign: "center", marginBottom: 12
+      }}>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", marginBottom: 6 }}>STARTS IN</div>
+        <div style={{ fontSize: 30, fontFamily: "Anton, Epilogue, sans-serif", color: "var(--tx)", fontWeight: 400, letterSpacing: ".03em" }}>
+          {fmtCountdown(state.msUntil)}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", padding: "10px 12px",
+        background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, fontFamily: "Epilogue" }}>
+        <span style={{ fontSize: 12, color: "var(--dm)" }}>Breakers entered</span>
+        <span style={{ fontSize: 18, fontWeight: 800, color: "var(--tx)", fontFamily: "JetBrains Mono" }}>{(ev.players || []).length}</span>
+      </div>
+    </div>;
+  }
+
+  // ── PRELIMS (no scores) ──────────────────────────────────────
+  if (state.kind === "prelims") {
+    var roster = (ev.players || []).slice();
+    return <div style={Object.assign({}, CV, { background: "var(--bg)", padding: 18, fontFamily: "Epilogue" })}>
+      <AppHead />
+      {header}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1, padding: "10px 12px", background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10 }}>
+          <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".12em" }}>ENTERED</div>
+          <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "JetBrains Mono", color: "var(--tx)" }}>{roster.length}</div>
+        </div>
+        <div style={{ flex: 1, padding: "10px 12px", background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10 }}>
+          <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".12em" }}>JUDGES</div>
+          <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "JetBrains Mono", color: "var(--tx)" }}>{ev.nj || 3}</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", marginBottom: 8 }}>◆ ROSTER</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
+        {roster.map(function (pl, i) {
+          var crew = crewName(pl);
+          return <div key={pl.id} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
+            background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8
+          }}>
+            <span style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", minWidth: 24, fontWeight: 700 }}>{i + 1}</span>
+            <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "var(--tx)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pl.name}</span>
+            {crew && <span style={{ fontSize: 11, color: "var(--cr)", fontFamily: "Epilogue" }}>{crew}</span>}
+          </div>;
+        })}
+        {roster.length === 0 && <div style={{ fontSize: 12, color: "var(--dm)", padding: 12, textAlign: "center" }}>Waiting for check-ins…</div>}
+      </div>
+      <div style={{ marginTop: 12, fontSize: 11, color: "var(--dm)", textAlign: "center", fontStyle: "italic" }}>
+        Prelim scores stay hidden during the event.
+      </div>
+    </div>;
+  }
+
+  // ── BRACKET ──────────────────────────────────────────────────
+  if (state.kind === "bracket") {
+    var bk = ev.bracket;
+    var liveRoundIdx = (function () {
+      for (var i = 0; i < bk.length; i++) {
+        if (bk[i].some(function (m) { return !m.winner; })) return i;
+      }
+      return bk.length - 1;
+    })();
+    // Active = user's clicked tab if any, else the live playing round.
+    var curRoundIdx = (viewingRoundIdx !== null && viewingRoundIdx < bk.length) ? viewingRoundIdx : liveRoundIdx;
+    var curRound = bk[curRoundIdx];
+    var curLabel = getRN(bk, curRoundIdx);
+
+    // Look up profile data (city + country) for monogram/flag display
+    var profileFor = function (pid) {
+      return pid ? profiles.find(function (x) { return x.id === pid; }) : null;
+    };
+
+    // Monogram avatar with optional gold ring for "marquee" matches
+    function Monogram(opts) {
+      var initial = (opts.name || "?").charAt(0).toUpperCase();
+      var ring = opts.gold ? "var(--gd)" : "var(--b1)";
+      return <div style={{
+        width: 38, height: 38, borderRadius: 99, flexShrink: 0,
+        background: "var(--c1)", border: "2px solid " + ring,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: "Anton, Epilogue, sans-serif", fontSize: 17, color: opts.gold ? "var(--gd)" : "var(--tx)",
+        boxShadow: opts.gold ? "0 0 10px rgba(184,134,11,.25)" : "none"
+      }}>{initial}</div>;
+    }
+
+    // Per-round score drawer — uses tallyMatchRounds to render judge results per round
+    function ScoreDrawer(opts) {
+      var m = opts.match;
+      var nj = ev.nj || 3;
+      var stageKey = stageKeyForMatchCount(curRound.length);
+      var targetR = (ev.roundsPerStage && ev.roundsPerStage[stageKey]) || STAGE_DEFAULTS[stageKey] || 1;
+      var tally = tallyMatchRounds(m, nj, targetR);
+      if (!tally.perRound.length) return <div style={{
+        fontSize: 11, color: "var(--dm)", fontStyle: "italic", padding: 8, textAlign: "center"
+      }}>No rounds scored yet.</div>;
+      return <div style={{ animation: "drawerIn .3s ease" }}>
+        {tally.perRound.map(function (r, i) {
+          var wName = r.winner === "red" ? (m.p1 && m.p1.name) : r.winner === "blue" ? (m.p2 && m.p2.name) : null;
+          return <div key={i} style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+            marginTop: 4, background: "var(--c2)", borderRadius: 6,
+            border: "1px solid " + (r.winner ? "var(--b1)" : "var(--b2)")
+          }}>
+            <span style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", fontWeight: 800, minWidth: 30 }}>R{i + 1}</span>
+            <span style={{ fontSize: 12, fontFamily: "JetBrains Mono", color: "var(--tx)", fontWeight: 700, minWidth: 36 }}>{r.red}–{r.blue}</span>
+            <span style={{ flex: 1, fontSize: 11, color: wName ? "var(--gd)" : "var(--dm)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {wName || "Pending"}
+            </span>
+          </div>;
+        })}
+        <div style={{ marginTop: 6, fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", textAlign: "right" }}>
+          {tally.redRounds} – {tally.blueRounds} · best of {targetR}
+        </div>
+      </div>;
+    }
+
+    return <div style={Object.assign({}, CV, { background: "var(--bg)", padding: 18, fontFamily: "Epilogue" })}>
+      <AppHead />
+      {header}
+
+      {/* Progress strip — clickable tabs to navigate between rounds. Mini-dots show matches decided. */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {bk.map(function (rd, ri) {
+          var done = rd.filter(function (m) { return m.winner; }).length;
+          var isActive = ri === curRoundIdx;
+          var isLive = ri === liveRoundIdx;
+          var isDone = done === rd.length;
+          return <button key={ri} onClick={function () {
+            setViewingRoundIdx(ri === liveRoundIdx ? null : ri);
+            setExpandedMid(null);
+          }} style={{
+            flex: 1, minWidth: 0, padding: "8px 6px",
+            background: isActive ? "var(--ac2)" : "var(--c1)",
+            border: "1px solid " + (isActive ? "var(--ac)" : "var(--b1)"),
+            borderRadius: 7, cursor: "pointer", touchAction: "manipulation",
+            fontFamily: "Epilogue", textAlign: "left"
+          }}>
+            <div style={{
+              fontSize: 9, fontFamily: "JetBrains Mono",
+              color: isActive ? "var(--ac)" : isDone ? "var(--gd)" : "var(--dm)",
+              fontWeight: 800, letterSpacing: ".08em", textAlign: "center",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+            }}>{getRN(bk, ri).toUpperCase()}{isLive && !isActive && <span style={{ color: "var(--rd)", marginLeft: 3 }}>●</span>}</div>
+            <div style={{ display: "flex", justifyContent: "center", gap: 3, marginTop: 4 }}>
+              {rd.map(function (m, mi) {
+                var d = !!m.winner;
+                return <span key={mi} style={{
+                  width: 6, height: 6, borderRadius: 99,
+                  background: d ? "var(--gd)" : (isActive ? "var(--ac)" : "var(--b1)"),
+                  opacity: d ? 1 : (isActive ? 0.5 : 1)
+                }} />;
+              })}
+            </div>
+          </button>;
+        })}
+      </div>
+
+      <div style={{ marginBottom: 10, fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800 }}>
+        {curRoundIdx === liveRoundIdx ? "NOW" : "VIEWING"} · {curLabel.toUpperCase()} <span style={{ color: "var(--dm)", marginLeft: 6 }}>
+          {curRound.filter(function (m) { return m.winner; }).length}/{curRound.length} DECIDED
+        </span>
+      </div>
+
+      {/* MATCHUP PREVIEW — marquee card for the Final when both finalists are set
+          but the match hasn't been decided yet. Shows head-to-head history across
+          all past events to set the stage. */}
+      {(function () {
+        if (curRoundIdx !== bk.length - 1) return null;
+        var fm = curRound[0];
+        if (!fm || !fm.p1 || !fm.p2 || fm.winner) return null;
+        var a = fm.p1, b = fm.p2;
+        var prA = profileFor(a.pid), prB = profileFor(b.pid);
+        var h2h = { aWins: 0, bWins: 0, lastEv: null };
+        (events || []).forEach(function (ev2) {
+          if (!ev2.bracket || ev2.id === ev.id) return;
+          ev2.bracket.forEach(function (rd) { rd.forEach(function (m2) {
+            if (!m2.winner || !m2.p1 || !m2.p2) return;
+            var aHere = (m2.p1.pid === a.pid && m2.p2.pid === b.pid) || (m2.p1.pid === b.pid && m2.p2.pid === a.pid);
+            if (!aHere) return;
+            if (m2.winner.pid === a.pid) h2h.aWins++;
+            else if (m2.winner.pid === b.pid) h2h.bWins++;
+            if (!h2h.lastEv) h2h.lastEv = ev2;
+          }); });
+        });
+        var prevMet = h2h.aWins + h2h.bWins;
+        var initial = function (n) { return (n || "?").charAt(0).toUpperCase(); };
+        var pillar = function (side, dancer, profile) {
+          var crew = dancer.crew || (profile && profile.crews && profile.crews[0] && profile.crews[0].name) || "";
+          var country = profile && profile.country;
+          return <div style={{ flex: 1, minWidth: 0, textAlign: "center", padding: "10px 6px" }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: 99, margin: "0 auto 8px",
+              background: "var(--c1)", border: "3px solid var(--gd)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "Anton, Epilogue, sans-serif", fontSize: 30, color: "var(--gd)",
+              boxShadow: "0 0 16px rgba(184,134,11,.3)"
+            }}>{initial(dancer.name)}</div>
+            <div style={{
+              fontFamily: "Anton, Epilogue, sans-serif", fontSize: 18, fontWeight: 400,
+              color: "var(--tx)", letterSpacing: ".01em", lineHeight: 1.05,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+            }}>{dancer.name}</div>
+            {crew && <div style={{ fontSize: 11, color: "var(--cr)", fontWeight: 700, marginTop: 3,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{crew}</div>}
+            {country && <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>{countryFlag(country)} {country}</div>}
+            <div style={{ marginTop: 6, fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--gd)", fontWeight: 800,
+              fontVariantNumeric: "tabular-nums" }}>{side === "a" ? h2h.aWins : h2h.bWins} W</div>
+          </div>;
+        };
+        return <div style={{
+          background: "linear-gradient(135deg, var(--gd2) 0%, var(--c2) 100%)",
+          border: "2px solid var(--gd)", borderRadius: 14, marginBottom: 14,
+          padding: 12, animation: "fu .4s ease"
+        }}>
+          <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--gd)", letterSpacing: ".18em", fontWeight: 800, textAlign: "center", marginBottom: 4 }}>
+            🏆 THE FINAL
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {pillar("a", a, prA)}
+            <div style={{
+              fontFamily: "Anton, Epilogue, sans-serif", fontSize: 26, color: "var(--gd)",
+              fontWeight: 400, letterSpacing: ".05em", padding: "0 4px"
+            }}>VS</div>
+            {pillar("b", b, prB)}
+          </div>
+          <div style={{ textAlign: "center", marginTop: 6, paddingTop: 8, borderTop: "1px solid var(--gd)",
+            fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".08em" }}>
+            {prevMet === 0
+              ? "FIRST MEETING"
+              : "HEAD-TO-HEAD: " + h2h.aWins + "–" + h2h.bWins + (h2h.lastEv ? " · LAST AT " + h2h.lastEv.name.toUpperCase() : "")}
+          </div>
+        </div>;
+      })()}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+        {curRound.map(function (m, i) {
+          var done = !!m.winner;
+          var isExpanded = expandedMid === m.mid;
+          var p1 = m.p1, p2 = m.p2;
+          var pr1 = p1 && profileFor(p1.pid);
+          var pr2 = p2 && profileFor(p2.pid);
+          var w1 = done && p1 && m.winner.id === p1.id;
+          var w2 = done && p2 && m.winner.id === p2.id;
+
+          function Row(opts) {
+            var pl = opts.pl, pr = opts.profile, isW = opts.isW;
+            if (!pl) return <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic", padding: "10px 8px" }}>— TBD —</div>;
+            var crew = pl.crew || (pr && pr.crews && pr.crews[0] && pr.crews[0].name) || "";
+            var city = pr && pr.city;
+            var country = pr && pr.country;
+            return <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "9px 10px", borderRadius: 8,
+              background: isW ? "var(--gd2)" : "transparent",
+              border: isW ? "1px solid var(--gd)" : "1px solid transparent"
+            }}>
+              <Monogram name={pl.name} gold={opts.gold} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 14, fontWeight: isW ? 900 : 700, fontFamily: "Epilogue",
+                  color: isW ? "var(--gd)" : "var(--tx)",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+                }}>{pl.name}</div>
+                <div style={{
+                  fontSize: 10, color: "var(--dm)", fontFamily: "Epilogue", marginTop: 1,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+                }}>
+                  {crew && <span style={{ color: "var(--cr)", fontWeight: 700 }}>{crew}</span>}
+                  {crew && (city || country) && <span> · </span>}
+                  {city && <span>{city}</span>}
+                  {country && <span style={{ marginLeft: 4 }}>{countryFlag(country)}</span>}
+                </div>
+              </div>
+              {isW && <span style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--gd)", fontWeight: 900, letterSpacing: ".1em" }}>WIN</span>}
+            </div>;
+          }
+
+          var marqueeGold = curRoundIdx === bk.length - 1; // gold ring on the Final
+
+          return <div key={m.mid || i} style={{
+            background: "var(--c1)", border: "1px solid " + (done ? "var(--gd)" : "var(--b1)"),
+            borderRadius: 12, padding: 8, animation: "fu .35s ease",
+            cursor: m.rounds && m.rounds.length > 0 ? "pointer" : "default"
+          }}
+            onClick={function () {
+              if (m.rounds && m.rounds.length > 0) setExpandedMid(isExpanded ? null : m.mid);
+            }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 6px 4px" }}>
+              <span style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", fontWeight: 800, letterSpacing: ".12em" }}>MATCH {i + 1}</span>
+              {done && <span style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--gd)", fontWeight: 900, letterSpacing: ".12em" }}>● DECIDED</span>}
+              {m.rounds && m.rounds.length > 0 && <span style={{ marginLeft: "auto", fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--ac)", fontWeight: 700 }}>
+                {isExpanded ? "▴ HIDE" : "▾ TAP FOR ROUNDS"}
+              </span>}
+            </div>
+            <Row pl={p1} profile={pr1} isW={w1} gold={marqueeGold} />
+            <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", textAlign: "center", letterSpacing: ".2em", padding: "2px 0" }}>VS</div>
+            <Row pl={p2} profile={pr2} isW={w2} gold={marqueeGold} />
+            {isExpanded && <div style={{ marginTop: 8, padding: 8, background: "var(--c2)", borderRadius: 8, border: "1px solid var(--b1)" }}>
+              <ScoreDrawer match={m} />
+            </div>}
+          </div>;
+        })}
+      </div>
+
+      {curRoundIdx < bk.length - 1 && <div style={{ marginTop: 14, fontSize: 11, color: "var(--dm)", textAlign: "center", fontFamily: "Epilogue" }}>
+        Next: <b>{getRN(bk, curRoundIdx + 1)}</b>
+      </div>}
+      <EmbedAttrib />
+    </div>;
+  }
+
+  // ── CHAMPION (24h grace) ─────────────────────────────────────
+  if (state.kind === "champion") {
+    var champ = state.champion;
+    var champCrew = crewName(champ);
+    var champProfile = champ.pid ? profiles.find(function (p2) { return p2.id === champ.pid; }) : null;
+    var champYt = champ.clip || (champProfile && champProfile.youtube) || null;
+    var bk2 = ev.bracket;
+    var finals = bk2[bk2.length - 1][0];
+    var secondPlace = (finals.p1 && finals.p1.id === champ.id) ? finals.p2 : finals.p1;
+    var thirdPlaceWinner = ev.thirdPlaceMatch && ev.thirdPlaceMatch.winner;
+    var hoursLeft = Math.max(0, Math.ceil((state.anchor + LIVE_GRACE_MS - Date.now()) / (60 * 60 * 1000)));
+    return <div style={Object.assign({}, CV, { background: "var(--bg)", padding: 18, fontFamily: "Epilogue" })}>
+      <AppHead />
+      {header}
+      <div style={{
+        padding: "20px 16px", background: "linear-gradient(135deg, var(--gd2) 0%, var(--c2) 100%)",
+        border: "2px solid var(--gd)", borderRadius: 14, textAlign: "center", marginBottom: 12,
+        animation: "fu .5s ease"
+      }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--gd)", letterSpacing: ".2em", fontWeight: 800, marginBottom: 6 }}>
+          🏆 CHAMPION
+        </div>
+        <div style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 38, fontWeight: 400, color: "var(--tx)", lineHeight: 1.05, letterSpacing: ".02em" }}>
+          {champ.name}
+        </div>
+        {champCrew && <div style={{ fontSize: 13, color: "var(--cr)", fontFamily: "Epilogue", marginTop: 6, fontWeight: 700 }}>{champCrew}</div>}
+      </div>
+      {champYt && <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", marginBottom: 6 }}>◆ HIGHLIGHT</div>
+        <MobileAutoplayYoutube url={champYt} title={champ.name + " — champion clip"} autoplay={true} />
+      </div>}
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", marginBottom: 6 }}>◆ PODIUM</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+          background: "var(--gd2)", border: "1px solid var(--gd)", borderRadius: 8 }}>
+          <span style={{ fontSize: 18 }}>🥇</span>
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 800, color: "var(--gd)" }}>{champ.name}</span>
+        </div>
+        {secondPlace && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+          background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8 }}>
+          <span style={{ fontSize: 16 }}>🥈</span>
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>{secondPlace.name}</span>
+        </div>}
+        {thirdPlaceWinner && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+          background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8 }}>
+          <span style={{ fontSize: 16 }}>🥉</span>
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>{thirdPlaceWinner.name}</span>
+        </div>}
+      </div>
+      <div style={{ marginTop: 14, fontSize: 10, color: "var(--dm)", textAlign: "center", fontFamily: "JetBrains Mono", letterSpacing: ".08em" }}>
+        WIDGET CLOSES IN ~{hoursLeft}H
+      </div>
+      <EmbedAttrib />
+    </div>;
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DANCER PROFILE EMBED (?embed=dancer-profile&dancer=<profile.id>)
+// ═══════════════════════════════════════════════════════════════
+// Mobile-first 3-zone profile widget: hero identity card on top,
+// quick-stat pillars below the divider, then a tab toggle that swaps
+// between Overview, Battle History, and Media without leaving the card.
+function DancerProfileEmbed(p) {
+  var cfg = p.config;
+  var profiles = p.profiles || [];
+  var events = p.events || [];
+  var extEvents = p.extEvents || [];
+  var crews = p.crews || [];
+
+  var initialTab = (["overview", "history", "media"].indexOf(cfg.tab) >= 0) ? cfg.tab : "overview";
+  var _tab = useState(initialTab), tab = _tab[0], setTab = _tab[1];
+
+  // Resolve the profile from URL param.
+  var profile = useMemo(function () {
+    if (!cfg.dancerId) return null;
+    return profiles.find(function (x) { return x.id === cfg.dancerId; }) || null;
+  }, [profiles, cfg.dancerId]);
+
+  // Stats: derive from calcStats so this widget stays in sync with the rest of the app.
+  var stats = useMemo(function () {
+    return calcStats(events, extEvents, profiles, crews);
+  }, [events, extEvents, profiles, crews]);
+
+  var dancer = useMemo(function () {
+    if (!profile) return null;
+    var entry = stats.pR.find(function (x) { return x.id === profile.id; });
+    if (!entry) return null;
+    // Global rank: pR sorted by dpr desc.
+    var rankIdx = stats.pR.slice().sort(function (a, b) { return b.dpr - a.dpr; })
+      .findIndex(function (x) { return x.id === profile.id; });
+    // Crew name lookup.
+    var crewName = "";
+    if (profile.primaryCrew) {
+      var cr = crews.find(function (c) { return c.id === profile.primaryCrew; });
+      if (cr) crewName = cr.name;
+    } else if (profile.crews && profile.crews.length > 0) {
+      crewName = profile.crews[0].name;
+    }
+    // Approved clips: collect every event-player record with a clip, plus the
+    // pinned profile.youtube as the primary. Mirrors PlayerDetail's Highlight Reel.
+    var clips = [];
+    if (profile.youtube) {
+      var pyt = ytId(profile.youtube);
+      if (pyt) clips.push({ id: "primary", label: "🎬 PRIMARY CLIP", subLabel: null, ytId: pyt });
+    }
+    events.forEach(function (ev) {
+      var pl = (ev.players || []).find(function (x) { return x.pid === profile.id; });
+      if (pl && pl.clip) {
+        var cid = ytId(pl.clip);
+        if (cid) clips.push({ id: ev.id, label: ev.name, subLabel: ev.dt, ytId: cid });
+      }
+    });
+    // Battle history rows from placements (newest first; events list isn't time-sorted, so reverse the natural order).
+    var history = (entry.placements || []).slice().reverse().map(function (row) {
+      return {
+        eventName: row.ev,
+        placement: PLACE_LABEL[row.pl] || String(row.pl || "—"),
+        pointsEarned: row.pts || 0
+      };
+    });
+    // Lifetime Round of the Night count for this dancer across all events.
+    var rotnCount = 0;
+    events.forEach(function (ev) {
+      (ev.roundsOfTheNight || []).forEach(function (r) {
+        if (r.playerPid === profile.id) rotnCount++;
+      });
+    });
+    return {
+      name: entry.breakingName || entry.fullName || "Unknown",
+      crewName: crewName,
+      country: entry.country || "",
+      globalRank: rankIdx >= 0 ? rankIdx + 1 : null,
+      seasonAverage: entry.standings || 0,
+      eventsCount: entry.eventsAttended || 0,
+      wins: entry.wins || 0,
+      cypherKings: entry.cypherKings || 0,
+      winPct: entry.winPct || 0,
+      rotnCount: rotnCount,
+      history: history,
+      clips: clips
+    };
+  }, [profile, stats, events, crews]);
+
+  useEmbedHeight([profile && profile.id, tab, dancer && dancer.history.length, dancer && dancer.clips.length]);
+
+  if (!profile || !dancer) {
+    return <div style={Object.assign({}, CV, {
+      minHeight: 140, background: "var(--bg)", padding: 18,
+      fontFamily: "Epilogue", color: "var(--dm)", fontSize: 13, textAlign: "center"
+    })}>
+      <AppHead />
+      <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, letterSpacing: ".15em", color: "var(--dm)", marginBottom: 6 }}>CYPHER NET — PROFILE</div>
+      {cfg.dancerId ? "Dancer not found." : "Pass ?dancer=<id> to load a profile."}
+    </div>;
+  }
+
+  // Tabular-nums + touch-manipulation equivalents.
+  var monoNum = { fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" };
+  var tap = { touchAction: "manipulation" };
+
+  function StatPillar(opts) {
+    return <div style={{
+      background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10,
+      padding: "10px 8px", textAlign: "center"
+    }}>
+      <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)",
+        letterSpacing: ".12em", fontWeight: 800, textTransform: "uppercase", marginBottom: 4 }}>{opts.label}</div>
+      <div style={Object.assign({ fontSize: 17, fontWeight: 900, color: opts.color || "var(--tx)" }, monoNum)}>{opts.value}</div>
+    </div>;
+  }
+
+  function TabBtn(opts) {
+    var active = tab === opts.id;
+    return <button type="button" onClick={function () { setTab(opts.id); }}
+      style={Object.assign({
+        flex: 1, padding: "9px 6px", textAlign: "center", cursor: "pointer",
+        fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 800,
+        letterSpacing: ".12em", textTransform: "uppercase",
+        background: active ? "var(--c2)" : "transparent",
+        color: active ? "var(--ac)" : "var(--dm)",
+        border: "1px solid " + (active ? "var(--ac)" : "transparent"),
+        borderRadius: 8, transition: "background .15s, color .15s, border-color .15s"
+      }, tap)}>
+      {opts.label}
+    </button>;
+  }
+
+  // ── HERO + STAT PILLARS (always visible) ──
+  var hero = <div style={{ padding: 18, borderBottom: "1px solid var(--b1)", background: "var(--c2)" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div style={{
+        width: 64, height: 64, borderRadius: 99,
+        background: "var(--c1)", border: "2px solid var(--gd)",
+        boxShadow: "0 0 14px rgba(184,134,11,.18)",
+        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        fontFamily: "Anton, Epilogue, sans-serif", fontSize: 26, color: "var(--gd)"
+      }}>
+        {(dancer.name || "?").charAt(0).toUpperCase()}
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        {dancer.globalRank && <span style={Object.assign({
+          display: "inline-block", fontSize: 9, fontWeight: 800, color: "var(--gd)",
+          letterSpacing: ".18em", textTransform: "uppercase"
+        }, monoNum)}>
+          {"RANK #" + dancer.globalRank + " GLOBAL"}
+        </span>}
+        <h2 style={{
+          fontFamily: "Anton, Epilogue, sans-serif", fontSize: 22, fontWeight: 400,
+          letterSpacing: ".01em", color: "var(--tx)", margin: "2px 0 2px",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+        }}>{dancer.name}</h2>
+        <p style={{
+          fontSize: 12, color: "var(--dm)", fontFamily: "Epilogue", margin: 0,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+        }}>
+          {(dancer.crewName || "Independent")}
+          {dancer.country && <span> · <span style={{ color: "var(--ac)" }}>{dancer.country}</span></span>}
+        </p>
+      </div>
+    </div>
+
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--b1)" }}>
+      <StatPillar label="Wins" value={dancer.wins} color="var(--gd)" />
+      <StatPillar label="Events" value={dancer.eventsCount} color="var(--ac)" />
+      <StatPillar label="Avg Round" value={dancer.seasonAverage > 0 ? dancer.seasonAverage.toFixed(2) : "—"} color="var(--tx)" />
+    </div>
+  </div>;
+
+  var tabBar = <div style={{ display: "flex", gap: 4, padding: 6, borderBottom: "1px solid var(--b1)", background: "var(--c1)" }}>
+    <TabBtn id="overview" label="Overview" />
+    <TabBtn id="history" label="History" />
+    <TabBtn id="media" label="Media" />
+  </div>;
+
+  // ── PANEL: OVERVIEW ──
+  function Row(opts) {
+    return <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "8px 0", borderBottom: opts.last ? "none" : "1px solid var(--b1)"
+    }}>
+      <span style={{ fontSize: 12, color: "var(--dm)", fontFamily: "Epilogue" }}>{opts.label}</span>
+      <span style={Object.assign({ fontSize: 12, fontWeight: 800, color: opts.color || "var(--tx)" }, monoNum)}>{opts.value}</span>
+    </div>;
+  }
+  function tierFromAvg(avg) {
+    if (avg >= 8) return { label: "Elite (Tier S)", color: "var(--gd)" };
+    if (avg >= 7) return { label: "High (Tier 1)", color: "var(--gn)" };
+    if (avg >= 5) return { label: "Mid (Tier 2)", color: "var(--ac)" };
+    if (avg > 0) return { label: "Developing (Tier 3)", color: "var(--dm)" };
+    return { label: "Unranked", color: "var(--dm)" };
+  }
+  // Win streak = consecutive 1st placements scanning newest-first.
+  var streak = 0;
+  for (var si = 0; si < dancer.history.length; si++) {
+    if (dancer.history[si].placement === "1st") streak++; else break;
+  }
+  var tierInfo = tierFromAvg(dancer.seasonAverage);
+  var rotnHallOfFame = dancer.rotnCount >= 3;
+  var overviewPanel = <div style={{ animation: "fu .25s ease" }}>
+    {/* 🌟 Round of the Night badge — Hall of Fame tier kicks in at 3+ lifetime awards. */}
+    {dancer.rotnCount > 0 && <div style={{
+      display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
+      background: rotnHallOfFame ? "linear-gradient(135deg, var(--gd2) 0%, var(--c2) 100%)" : "var(--c1)",
+      border: "1px solid " + (rotnHallOfFame ? "var(--gd)" : "var(--b1)"),
+      borderRadius: 12, marginBottom: 10
+    }}>
+      <span style={{ fontSize: 22 }}>🌟</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--tx)", fontFamily: "Epilogue" }}>
+          {dancer.rotnCount} Round-of-the-Night Award{dancer.rotnCount === 1 ? "" : "s"}
+        </div>
+        {rotnHallOfFame && <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--gd)", letterSpacing: ".12em", fontWeight: 800, marginTop: 2 }}>
+          ◆ HALL OF FAME
+        </div>}
+      </div>
+      <span style={Object.assign({ fontSize: 22, fontWeight: 900, color: "var(--gd)" }, monoNum)}>×{dancer.rotnCount}</span>
+    </div>}
+
+    <div style={{ background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 12, padding: "10px 14px" }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800, marginBottom: 6, textTransform: "uppercase" }}>
+        Performance Analytics
+      </div>
+      <Row label="Consistency Index" value={tierInfo.label} color={tierInfo.color} />
+      <Row label="Current Win Streak" value={streak > 0 ? (streak + " Unbeaten") : "—"} color={streak > 0 ? "var(--gn)" : "var(--dm)"} />
+      <Row label="Win %" value={(dancer.winPct || 0) + "%"} />
+      <Row label="Cypher Kings" value={dancer.cypherKings} color={dancer.cypherKings > 0 ? "var(--cr)" : "var(--dm)"} last />
+    </div>
+  </div>;
+
+  // ── PANEL: HISTORY ──
+  // Placement distribution chart: stacked horizontal bar showing % of events
+  // ending in each bucket (1st / 2nd / Top 4 / Top 8 / Top 16 / Participation).
+  // Encodes magnitude by length, not just color — readable when printed B&W.
+  var placementBuckets = (function () {
+    var buckets = [
+      { key: "1st",           color: "var(--gd)",       label: "🥇" },
+      { key: "2nd",           color: "#9ca3af",         label: "🥈" },
+      { key: "Top 4",         color: "#cd7f32",         label: "T4" },
+      { key: "Top 8",         color: "var(--ac)",       label: "T8" },
+      { key: "Top 16",        color: "var(--cr)",       label: "T16" },
+      { key: "Participation", color: "var(--dm)",       label: "P" }
+    ];
+    var counts = {};
+    buckets.forEach(function (b) { counts[b.key] = 0; });
+    dancer.history.forEach(function (row) {
+      if (counts.hasOwnProperty(row.placement)) counts[row.placement]++;
+    });
+    return buckets.map(function (b) { return Object.assign({}, b, { count: counts[b.key] }); })
+      .filter(function (b) { return b.count > 0; });
+  })();
+  var totalPlacements = placementBuckets.reduce(function (s, b) { return s + b.count; }, 0);
+
+  var historyPanel = <div style={{ animation: "fu .25s ease" }}>
+    {totalPlacements > 0 && <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", fontWeight: 700, marginBottom: 4 }}>
+        ◆ PLACEMENT MIX · {totalPlacements} EVENTS
+      </div>
+      <div style={{ display: "flex", height: 12, borderRadius: 4, overflow: "hidden", border: "1px solid var(--b1)" }}>
+        {placementBuckets.map(function (b) {
+          var pct = (b.count / totalPlacements) * 100;
+          return <div key={b.key} title={b.key + ": " + b.count + " (" + pct.toFixed(0) + "%)"} style={{
+            width: pct + "%", background: b.color
+          }} aria-label={b.key + " " + b.count} />;
+        })}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+        {placementBuckets.map(function (b) {
+          return <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)" }}>
+            <span style={{ width: 8, height: 8, background: b.color, borderRadius: 2, display: "inline-block" }} />
+            <span style={{ fontWeight: 800, color: "var(--tx)" }}>{b.count}</span>
+            <span>{b.key}</span>
+          </div>;
+        })}
+      </div>
+    </div>}
+    <div className="thin-scroll" style={{
+      maxHeight: 260, overflowY: "auto", paddingRight: 4,
+      scrollbarWidth: "thin", scrollbarColor: "var(--b1) transparent"
+    }}>
+      {dancer.history.length === 0 && <div style={{
+        textAlign: "center", padding: "32px 12px", fontSize: 12, color: "var(--dm)",
+        border: "1px dashed var(--b1)", borderRadius: 12
+      }}>No battle history yet.</div>}
+      {dancer.history.map(function (row, idx) {
+        var isWin = row.placement === "1st";
+        return <div key={idx} style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "10px 12px", marginBottom: 6,
+          background: "var(--c1)", border: "1px solid " + (isWin ? "var(--gd)" : "var(--b1)"),
+          borderRadius: 10
+        }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)", fontFamily: "Epilogue",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.eventName}</div>
+            <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 2 }}>
+              Result: <span style={{ color: isWin ? "var(--gd)" : "var(--tx)", fontWeight: 700 }}>{row.placement}</span>
+            </div>
+          </div>
+          <div style={{ textAlign: "right", marginLeft: 10 }}>
+            <div style={Object.assign({ fontSize: 13, fontWeight: 900, color: "var(--gd)" }, monoNum)}>
+              +{row.pointsEarned} PTS
+            </div>
+          </div>
+        </div>;
+      })}
+    </div>
+  </div>;
+
+  // ── PANEL: MEDIA ──
+  var mediaPanel = <div style={{ animation: "fu .25s ease" }}>
+    {dancer.clips.length > 0 ? <div>
+      {dancer.clips.map(function (c, i) {
+        return <div key={c.id} style={{ marginBottom: i < dancer.clips.length - 1 ? 14 : 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "baseline" }}>
+            <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {c.label}
+            </div>
+            {c.subLabel && <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", flexShrink: 0, marginLeft: 8 }}>{fmtD(c.subLabel)}</div>}
+          </div>
+          <MobileAutoplayYoutube url={"https://youtu.be/" + c.ytId} title={c.label} autoplay={i === 0 && dancer.clips.length === 1} />
+        </div>;
+      })}
+      <p style={{ fontSize: 10, color: "var(--dm)", fontStyle: "italic", textAlign: "center", marginTop: 10 }}>
+        🎬 Clips submitted by dancer, approved by admin.
+      </p>
+    </div> : <div style={{
+      textAlign: "center", padding: "44px 12px", fontSize: 12, color: "var(--dm)",
+      border: "1px dashed var(--b1)", borderRadius: 12
+    }}>
+      No highlights yet.
+    </div>}
+  </div>;
+
+  return <div style={Object.assign({}, CV, {
+    background: "var(--bg)", minHeight: "100vh", fontFamily: "Epilogue"
+  })}>
+    <AppHead />
+    <div style={{
+      maxWidth: 480, margin: "0 auto", background: "var(--c1)",
+      borderRadius: 14, overflow: "hidden", border: "1px solid var(--b1)",
+      boxShadow: "0 10px 32px rgba(15,15,18,.06)"
+    }}>
+      {hero}
+      {tabBar}
+      <div style={{ padding: 14, minHeight: 220 }}>
+        {tab === "overview" && overviewPanel}
+        {tab === "history" && historyPanel}
+        {tab === "media" && mediaPanel}
+      </div>
+      <EmbedAttrib />
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIVE TICKER EMBED (?embed=ticker)
+// ═══════════════════════════════════════════════════════════════
+// Broadcast-style horizontal marquee strip. Walks every event's bracket,
+// builds "EVENT ⚡ ROUND: WINNER DEF. LOSER" entries for completed matches,
+// scrolls left-to-right infinitely. Designed for a 32-44px tall banner at
+// the top of a third-party site. ?speed=<sec> overrides scroll duration.
+function LiveTickerEmbed(p) {
+  var cfg = p.config || {};
+  var allEvents = p.events || [];
+
+  // Scroll speed in seconds (full pass). Default 30s. Clamp to 8..120.
+  var speed = (function () {
+    var n = parseInt(cfg.speed, 10);
+    if (!(n > 0)) return 30;
+    return Math.max(8, Math.min(120, n));
+  })();
+
+  var items = useMemo(function () {
+    var out = [];
+    // Newest events first so recent results lead the ticker.
+    var evs = allEvents.slice().sort(function (a, b) {
+      return new Date(b.dt || 0) - new Date(a.dt || 0);
+    });
+    evs.forEach(function (ev) {
+      var bk = ev.bracket;
+      if (!bk) return;
+      // bracket is [[match,...], ...] — walk rounds + matches and pick
+      // completed matchups (m.winner present).
+      for (var ri = bk.length - 1; ri >= 0; ri--) {
+        var round = bk[ri] || [];
+        var roundLabel = getRN(bk, ri).toUpperCase();
+        for (var mi = 0; mi < round.length; mi++) {
+          var m = round[mi];
+          if (!m || !m.winner || !m.p1 || !m.p2) continue;
+          var loser = (m.winner.id === m.p1.id) ? m.p2 : m.p1;
+          var evName = (ev.name || "EVENT").split(":")[0].toUpperCase();
+          out.push({
+            id: ev.id + "_" + ri + "_" + mi,
+            ev: evName,
+            round: roundLabel,
+            winner: m.winner.name,
+            loser: loser.name
+          });
+        }
+      }
+    });
+    return out;
+  }, [allEvents]);
+
+  useEmbedHeight([items.length, speed]);
+
+  // Empty state — keep the strip occupied so the layout doesn't collapse.
+  var displayItems = items.length > 0 ? items : [{
+    id: "empty", ev: "CYPHER NET", round: "STANDBY", winner: "Live feed begins when a match wraps", loser: ""
+  }];
+
+  // Duplicate the list once so the marquee can loop seamlessly with a
+  // -50% translation on the inner track.
+  var loop = displayItems.concat(displayItems);
+
+  return <div style={Object.assign({}, CV, {
+    background: "var(--bg)", fontFamily: "Epilogue",
+    borderTop: "1px solid var(--b1)", borderBottom: "1px solid var(--b1)",
+    overflow: "hidden", width: "100%"
+  })}>
+    <AppHead />
+    <style>{
+      "@keyframes cnTickerScroll { from { transform: translate3d(0,0,0); } to { transform: translate3d(-50%,0,0); } }"
+      + ".cn-ticker-track:hover { animation-play-state: paused; }"
+    }</style>
+    <div style={{ display: "flex", alignItems: "center", overflow: "hidden", padding: "8px 0" }}>
+      <div className="cn-ticker-track" style={{
+        display: "inline-flex", flexShrink: 0, whiteSpace: "nowrap", gap: 28,
+        paddingLeft: 16,
+        animation: "cnTickerScroll " + speed + "s linear infinite",
+        willChange: "transform"
+      }}>
+        {loop.map(function (it, i) {
+          return <div key={i + "_" + it.id} style={{
+            display: "inline-flex", alignItems: "center", gap: 8,
+            fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--tx)",
+            letterSpacing: ".04em", fontWeight: 700
+          }}>
+            <span style={{ color: "var(--ac)", fontWeight: 800 }}>//</span>
+            <span style={{ color: "var(--dm)" }}>{it.ev}</span>
+            <span style={{ color: "var(--b1)" }}>·</span>
+            <span style={{ color: "var(--gd)", fontWeight: 800 }}>{it.round}</span>
+            <span style={{ color: "var(--b1)" }}>·</span>
+            <span style={{ color: "var(--tx)", fontWeight: 800 }}>{it.winner}</span>
+            {it.loser && <>
+              <span style={{ color: "var(--dm)", textTransform: "uppercase", fontSize: 9, fontWeight: 700 }}>def.</span>
+              <span style={{ color: "var(--dm)" }}>{it.loser}</span>
+            </>}
+          </div>;
+        })}
+      </div>
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT ARCHIVE EMBED (?embed=archive)
+// ═══════════════════════════════════════════════════════════════
+// Indexable list of every decided event with bracket. Tap a row to drill
+// into a single-event archive: champion banner, recap video (if details.recapUrl
+// is set), podium, ROTN list. Reuses EventRecapEmbed's design idiom.
+function EventArchiveEmbed(p) {
+  var cfg = p.config || {};
+  var allEvents = p.events || [];
+  var profiles = p.profiles || [];
+  var crews = p.crews || [];
+
+  // ?event=<id> deep-links straight into the drill-down view.
+  var _sel = useState(cfg.eventId || null), selId = _sel[0], setSelId = _sel[1];
+
+  // Archive list: events that have a bracket AND a declared champion. Newest first.
+  var archived = useMemo(function () {
+    return allEvents.filter(function (ev) {
+      var bk = ev.bracket;
+      var fm = bk && bk[bk.length - 1] && bk[bk.length - 1][0];
+      return !!(fm && fm.winner);
+    }).slice().sort(function (a, b) {
+      return new Date(b.dt || 0) - new Date(a.dt || 0);
+    });
+  }, [allEvents]);
+
+  var cur = useMemo(function () {
+    return selId ? archived.find(function (ev) { return ev.id === selId; }) || null : null;
+  }, [archived, selId]);
+
+  useEmbedHeight([selId, archived.length, cur && cur.id]);
+
+  // ── DRILL-DOWN: single archived event ──
+  if (cur) {
+    var bk2 = cur.bracket;
+    var fm2 = bk2[bk2.length - 1][0];
+    var champ = fm2.winner;
+    var second = champ && fm2 ? (fm2.p1 && fm2.p1.id === champ.id ? fm2.p2 : fm2.p1) : null;
+    var third = cur.thirdPlaceMatch && cur.thirdPlaceMatch.winner;
+    var recapId = cur.details && cur.details.recapUrl ? ytId(cur.details.recapUrl) : null;
+    var champProfile = champ && champ.pid ? profiles.find(function (x) { return x.id === champ.pid; }) : null;
+    var champYt = champ && champ.clip ? ytId(champ.clip) : (champProfile && champProfile.youtube ? ytId(champProfile.youtube) : null);
+    var rotn = cur.roundsOfTheNight || [];
+
+    return <div style={Object.assign({}, CV, { background: "var(--bg)", padding: 14, fontFamily: "Epilogue" })}>
+      <AppHead />
+      <button onClick={function () { setSelId(null); }} style={{
+        background: "none", border: "none", color: "var(--dm)",
+        fontFamily: "JetBrains Mono", fontSize: 10, letterSpacing: ".15em",
+        cursor: "pointer", padding: 0, marginBottom: 10, fontWeight: 700
+      }}>← BACK TO ARCHIVE</button>
+
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", fontWeight: 800, marginBottom: 4 }}>◆ ARCHIVE</div>
+        <h2 style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 24, fontWeight: 400, letterSpacing: ".02em", color: "var(--tx)", margin: "0 0 4px", lineHeight: 1.05 }}>{cur.name}</h2>
+        <p style={{ fontSize: 12, color: "var(--dm)", fontFamily: "Epilogue", margin: 0 }}>
+          {cur.dt && <span style={{ fontFamily: "JetBrains Mono", letterSpacing: ".08em" }}>{fmtD(cur.dt).toUpperCase()}</span>}
+          {cur.details && (cur.details.venueName || cur.details.city) && <span>
+            {" · "}{[cur.details.venueName, cur.details.city, cur.details.country].filter(Boolean).join(" · ")}
+          </span>}
+        </p>
+      </div>
+
+      {/* CHAMPION BANNER */}
+      {champ && <div style={{
+        padding: "18px 16px", background: "linear-gradient(135deg, var(--gd2) 0%, var(--c2) 100%)",
+        border: "2px solid var(--gd)", borderRadius: 14, textAlign: "center", marginBottom: 12
+      }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--gd)", letterSpacing: ".2em", fontWeight: 800, marginBottom: 6 }}>🏆 CHAMPION</div>
+        <div style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 32, fontWeight: 400, color: "var(--tx)", lineHeight: 1.05, letterSpacing: ".02em" }}>
+          {champ.name}
+        </div>
+      </div>}
+
+      {/* RECAP VIDEO (event-level) */}
+      {recapId && <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>📺 EVENT RECAP</div>
+        <MobileAutoplayYoutube url={"https://youtu.be/" + recapId} title={cur.name + " — recap"} autoplay={false} />
+      </div>}
+
+      {/* CHAMPION CLIP fallback (only if no event recap) */}
+      {!recapId && champYt && <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>🎬 CHAMPION CLIP</div>
+        <MobileAutoplayYoutube url={"https://youtu.be/" + champYt} title={champ.name + " — champion clip"} autoplay={false} />
+      </div>}
+
+      {/* PODIUM */}
+      {(champ || second || third) && <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>◆ PODIUM</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {champ && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+            background: "var(--gd2)", border: "1px solid var(--gd)", borderRadius: 8 }}>
+            <span style={{ fontSize: 18 }}>🥇</span>
+            <span style={{ flex: 1, fontSize: 14, fontWeight: 800, color: "var(--gd)" }}>{champ.name}</span>
+          </div>}
+          {second && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+            background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8 }}>
+            <span style={{ fontSize: 16 }}>🥈</span>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>{second.name}</span>
+          </div>}
+          {third && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+            background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8 }}>
+            <span style={{ fontSize: 16 }}>🥉</span>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>{third.name}</span>
+          </div>}
+        </div>
+      </div>}
+
+      {/* BRACKET */}
+      {cur.bracket && cur.bracket.length > 0 && <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>◆ BRACKET</div>
+        <CompactBracket event={cur} />
+      </div>}
+
+      {/* ROUND OF THE NIGHT (if any) */}
+      {rotn.length > 0 && <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>🌟 ROUND OF THE NIGHT</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {rotn.map(function (r) {
+            return <div key={r.id} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+              background: "var(--gd2)", border: "1px solid var(--gd)", borderRadius: 8
+            }}>
+              <span style={{ fontSize: 16 }}>🌟</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.playerName}</div>
+                {r.label && <div style={{ fontSize: 10, color: "var(--dm)", fontStyle: "italic" }}>{r.label}</div>}
+              </div>
+            </div>;
+          })}
+        </div>
+      </div>}
+
+      <EmbedAttrib />
+    </div>;
+  }
+
+  // ── DEFAULT: scrollable list of decided events ──
+  return <div style={Object.assign({}, CV, { background: "var(--bg)", padding: 14, fontFamily: "Epilogue", minHeight: 200 })}>
+    <AppHead />
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".18em", fontWeight: 800 }}>🏆 EVENT ARCHIVE</div>
+      <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>Every decided event — tap for the recap.</div>
+    </div>
+
+    {archived.length === 0 ? <div style={{
+      textAlign: "center", padding: "32px 12px", fontSize: 12, color: "var(--dm)",
+      border: "1px dashed var(--b1)", borderRadius: 12
+    }}>
+      No completed events yet.
+    </div> : <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {archived.map(function (ev) {
+        var bk = ev.bracket;
+        var fm = bk[bk.length - 1][0];
+        var champ = fm && fm.winner;
+        var hasRecap = !!(ev.details && ev.details.recapUrl && ytId(ev.details.recapUrl));
+        var dateStr = ev.dt ? new Date(ev.dt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+        return <button key={ev.id} onClick={function () { setSelId(ev.id); }} style={{
+          display: "block", textAlign: "left", width: "100%",
+          padding: "12px 14px", background: "var(--c1)",
+          border: "1px solid var(--b1)", borderRadius: 10, cursor: "pointer",
+          fontFamily: "Epilogue", touchAction: "manipulation"
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--tx)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.name}</div>
+              <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {dateStr && <span style={{ fontFamily: "JetBrains Mono", letterSpacing: ".06em" }}>{dateStr.toUpperCase()}</span>}
+                {ev.details && ev.details.city && <span> · {ev.details.city}</span>}
+              </div>
+            </div>
+            {hasRecap && <span style={{
+              fontSize: 9, fontFamily: "JetBrains Mono", letterSpacing: ".08em",
+              background: "var(--ac2)", color: "var(--ac)", padding: "2px 6px",
+              borderRadius: 4, fontWeight: 800, flexShrink: 0
+            }}>📺 RECAP</span>}
+          </div>
+          {champ && <div style={{ fontSize: 12, color: "var(--gd)", marginTop: 4, fontWeight: 700,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏆 {champ.name}</div>}
+        </button>;
+      })}
+    </div>}
+
+    <EmbedAttrib />
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT RECAP EMBED (?embed=event-recap&event=<event.id>)
+// ═══════════════════════════════════════════════════════════════
+// Post-event summary: hero with event name + date + venue, podium (🥇🥈🥉),
+// Round of the Night roll, champion clip, full participant list.
+function EventRecapEmbed(p) {
+  var cfg = p.config || {};
+  var events = p.events || [];
+  var profiles = p.profiles || [];
+  var crews = p.crews || [];
+
+  var ev = useMemo(function () {
+    if (!cfg.eventId) return null;
+    return events.find(function (e) { return e.id === cfg.eventId; }) || null;
+  }, [events, cfg.eventId]);
+
+  function profileOf(pid) { return profiles.find(function (x) { return x.id === pid; }) || null; }
+  function crewOf(cid) { return crews.find(function (c) { return c.id === cid; }) || null; }
+  function crewName(pl) {
+    if (!pl) return "";
+    var pr = pl.pid ? profileOf(pl.pid) : null;
+    if (pr && pr.primaryCrew) {
+      var c = crewOf(pr.primaryCrew);
+      if (c) return c.name;
+    }
+    return pl.crew || "";
+  }
+
+  var data = useMemo(function () {
+    if (!ev) return null;
+    var bk = ev.bracket;
+    var finalMatch = bk && bk[bk.length - 1] && bk[bk.length - 1][0];
+    var champ = finalMatch && finalMatch.winner;
+    var second = champ && finalMatch ? (finalMatch.p1 && finalMatch.p1.id === champ.id ? finalMatch.p2 : finalMatch.p1) : null;
+    var third = ev.thirdPlaceMatch && ev.thirdPlaceMatch.winner;
+    var champYt = champ && champ.clip;
+    if (!champYt && champ && champ.pid) {
+      var pr = profileOf(champ.pid);
+      if (pr && pr.youtube) champYt = pr.youtube;
+    }
+    return {
+      champ: champ, second: second, third: third, champYt: champYt,
+      rotn: ev.roundsOfTheNight || []
+    };
+  }, [ev, profiles]);
+
+  useEmbedHeight([ev && ev.id, data && data.rotn.length]);
+
+  if (!ev) {
+    return <div style={Object.assign({}, CV, {
+      minHeight: 140, background: "var(--bg)", padding: 18,
+      fontFamily: "Epilogue", color: "var(--dm)", fontSize: 13, textAlign: "center"
+    })}>
+      <AppHead />
+      <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, letterSpacing: ".15em", color: "var(--dm)", marginBottom: 6 }}>CYPHER NET — RECAP</div>
+      Pass ?event=&lt;id&gt; to load an event recap.
+    </div>;
+  }
+
+  var monoNum = { fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" };
+
+  return <div style={Object.assign({}, CV, { background: "var(--bg)", padding: 14, fontFamily: "Epilogue" })}>
+    <AppHead />
+
+    {/* HERO */}
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", fontWeight: 800, marginBottom: 4 }}>◆ EVENT RECAP</div>
+      <h2 style={{
+        fontFamily: "Anton, Epilogue, sans-serif", fontSize: 26, fontWeight: 400,
+        letterSpacing: ".02em", color: "var(--tx)", margin: "0 0 4px", lineHeight: 1.05
+      }}>{ev.name}</h2>
+      <p style={{ fontSize: 12, color: "var(--dm)", fontFamily: "Epilogue", margin: 0 }}>
+        {ev.dt && <span style={Object.assign({}, monoNum, { letterSpacing: ".08em" })}>{fmtD(ev.dt).toUpperCase()}</span>}
+        {ev.details && (ev.details.venueName || ev.details.city) && <span>
+          {" · "}{[ev.details.venueName, ev.details.city, ev.details.country].filter(Boolean).join(" · ")}
+        </span>}
+      </p>
+    </div>
+
+    {/* CHAMPION BANNER */}
+    {data && data.champ ? <div style={{
+      padding: "20px 16px", background: "linear-gradient(135deg, var(--gd2) 0%, var(--c2) 100%)",
+      border: "2px solid var(--gd)", borderRadius: 14, textAlign: "center", marginBottom: 12
+    }}>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--gd)", letterSpacing: ".2em", fontWeight: 800, marginBottom: 6 }}>
+        🏆 CHAMPION
+      </div>
+      <div style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 36, fontWeight: 400, color: "var(--tx)", lineHeight: 1.05, letterSpacing: ".02em" }}>
+        {data.champ.name}
+      </div>
+      {crewName(data.champ) && <div style={{ fontSize: 13, color: "var(--cr)", fontFamily: "Epilogue", marginTop: 6, fontWeight: 700 }}>{crewName(data.champ)}</div>}
+    </div> : <div style={{
+      padding: 14, background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10,
+      textAlign: "center", color: "var(--dm)", fontSize: 12, marginBottom: 12, fontStyle: "italic"
+    }}>Event has no champion yet.</div>}
+
+    {/* CHAMPION CLIP */}
+    {data && data.champYt && <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>◆ HIGHLIGHT</div>
+      <MobileAutoplayYoutube url={data.champYt} title={data.champ.name + " — champion clip"} autoplay={false} />
+    </div>}
+
+    {/* PODIUM */}
+    {data && (data.champ || data.second || data.third) && <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>◆ PODIUM</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {data.champ && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+          background: "var(--gd2)", border: "1px solid var(--gd)", borderRadius: 8 }}>
+          <span style={{ fontSize: 18 }}>🥇</span>
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 800, color: "var(--gd)" }}>{data.champ.name}</span>
+        </div>}
+        {data.second && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+          background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8 }}>
+          <span style={{ fontSize: 16 }}>🥈</span>
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>{data.second.name}</span>
+        </div>}
+        {data.third && <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+          background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 8 }}>
+          <span style={{ fontSize: 16 }}>🥉</span>
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "var(--tx)" }}>{data.third.name}</span>
+        </div>}
+      </div>
+    </div>}
+
+    {/* ROUND OF THE NIGHT */}
+    {data && data.rotn.length > 0 && <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>🌟 ROUND OF THE NIGHT</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {data.rotn.map(function (r) {
+          return <div key={r.id} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+            background: "var(--gd2)", border: "1px solid var(--gd)", borderRadius: 8
+          }}>
+            <span style={{ fontSize: 16 }}>🌟</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--tx)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.playerName}</div>
+              {r.label && <div style={{ fontSize: 10, color: "var(--dm)", fontStyle: "italic" }}>{r.label}</div>}
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>}
+
+    {/* BRACKET */}
+    {ev.bracket && ev.bracket.length > 0 && <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>
+        ◆ BRACKET
+      </div>
+      <CompactBracket event={ev} />
+    </div>}
+
+    {/* PARTICIPANTS */}
+    <div>
+      <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".12em", fontWeight: 800, marginBottom: 6 }}>
+        ◆ PARTICIPANTS ({(ev.players || []).length})
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {(ev.players || []).map(function (pl) {
+          return <span key={pl.id} style={{
+            fontSize: 11, padding: "4px 9px", background: "var(--c1)", border: "1px solid var(--b1)",
+            borderRadius: 6, color: "var(--tx)", fontFamily: "Epilogue", fontWeight: 600
+          }}>{pl.name}</span>;
+        })}
+      </div>
+    </div>
+    <EmbedAttrib />
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CREW EMBED (?embed=crew&crew=<crew.id>)
+// ═══════════════════════════════════════════════════════════════
+// Mobile-first crew profile: hero card, roster grid (monograms),
+// aggregate wins/events, recent crew placements.
+function CrewEmbed(p) {
+  var cfg = p.config || {};
+  var profiles = p.profiles || [];
+  var events = p.events || [];
+  var crews = p.crews || [];
+
+  var crew = useMemo(function () {
+    if (!cfg.crewId) return null;
+    return crews.find(function (c) { return c.id === cfg.crewId; }) || null;
+  }, [crews, cfg.crewId]);
+
+  // Aggregate stats across the crew
+  var data = useMemo(function () {
+    if (!crew) return null;
+    var members = profiles.filter(function (pr) {
+      return !pr.archived && pr.crews && pr.crews.some(function (c) { return c.id === crew.id; });
+    });
+    var memberIds = members.map(function (m) { return m.id; });
+    // Find events any crew member competed in
+    var eventsWithMembers = events.filter(function (ev) {
+      return (ev.players || []).some(function (pl) { return memberIds.indexOf(pl.pid) >= 0; });
+    });
+    // Total wins across all members (champions of any event)
+    // Also track per-member contribution so we can chart it below.
+    var totalWins = 0;
+    var winsByMember = {};
+    var eventsByMember = {};
+    members.forEach(function (m) { winsByMember[m.id] = 0; eventsByMember[m.id] = 0; });
+    var recent = [];
+    eventsWithMembers.forEach(function (ev) {
+      var bk = ev.bracket;
+      var champ = bk && bk[bk.length - 1] && bk[bk.length - 1][0] && bk[bk.length - 1][0].winner;
+      if (champ && memberIds.indexOf(champ.pid) >= 0) {
+        totalWins++;
+        winsByMember[champ.pid] = (winsByMember[champ.pid] || 0) + 1;
+      }
+      (ev.players || []).forEach(function (pl) {
+        if (memberIds.indexOf(pl.pid) >= 0) eventsByMember[pl.pid] = (eventsByMember[pl.pid] || 0) + 1;
+      });
+      // Find the member(s) who participated in this event
+      var participatingMembers = (ev.players || [])
+        .filter(function (pl) { return memberIds.indexOf(pl.pid) >= 0; })
+        .map(function (pl) {
+          var pr = members.find(function (m) { return m.id === pl.pid; });
+          var place = bk ? getPlace(bk, pl.id) : null;
+          return { name: pr ? (pr.breakingName || pr.fullName) : pl.name, place: place };
+        });
+      recent.push({ ev: ev, participants: participatingMembers });
+    });
+    recent.sort(function (a, b) { return new Date(b.ev.dt || 0) - new Date(a.ev.dt || 0); });
+    // Crew highlight reel: collect every approved event-player clip for any
+    // member, newest event first, cap at 5 so the widget stays mobile-friendly.
+    var clips = [];
+    eventsWithMembers.slice()
+      .sort(function (a, b) { return new Date(b.dt || 0) - new Date(a.dt || 0); })
+      .forEach(function (ev) {
+        (ev.players || []).forEach(function (pl) {
+          if (memberIds.indexOf(pl.pid) < 0 || !pl.clip) return;
+          var cid = ytId(pl.clip);
+          if (!cid) return;
+          clips.push({
+            id: ev.id + "_" + pl.id,
+            label: pl.name,
+            subLabel: ev.name,
+            ytId: cid
+          });
+        });
+      });
+    // Top contributors by wins (descending), keep entries with wins or events.
+    var topContrib = members.map(function (m) {
+      return {
+        id: m.id,
+        name: m.breakingName || m.fullName,
+        wins: winsByMember[m.id] || 0,
+        events: eventsByMember[m.id] || 0
+      };
+    }).filter(function (m) { return m.wins > 0 || m.events > 0; })
+      .sort(function (a, b) {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        return b.events - a.events;
+      }).slice(0, 5);
+
+    return {
+      members: members,
+      eventCount: eventsWithMembers.length,
+      totalWins: totalWins,
+      recent: recent.slice(0, 6),
+      clips: clips.slice(0, 5),
+      topContrib: topContrib
+    };
+  }, [crew, profiles, events]);
+
+  useEmbedHeight([crew && crew.id, data && data.members.length, data && data.clips.length, data && data.topContrib.length]);
+
+  if (!crew || !data) {
+    return <div style={Object.assign({}, CV, {
+      minHeight: 140, background: "var(--bg)", padding: 18,
+      fontFamily: "Epilogue", color: "var(--dm)", fontSize: 13, textAlign: "center"
+    })}>
+      <AppHead />
+      <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, letterSpacing: ".15em", color: "var(--dm)", marginBottom: 6 }}>CYPHER NET — CREW</div>
+      {cfg.crewId ? "Crew not found." : "Pass ?crew=<id> to load a crew."}
+    </div>;
+  }
+
+  var monoNum = { fontFamily: "JetBrains Mono", fontVariantNumeric: "tabular-nums" };
+
+  function Monogram(opts) {
+    var initial = (opts.name || "?").charAt(0).toUpperCase();
+    return <div style={{
+      width: 42, height: 42, borderRadius: 99, flexShrink: 0,
+      background: "var(--c2)", border: "2px solid var(--cr)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "Anton, Epilogue, sans-serif", fontSize: 18, color: "var(--cr)"
+    }}>{initial}</div>;
+  }
+
+  return <div style={Object.assign({}, CV, {
+    background: "var(--bg)", minHeight: "100vh", fontFamily: "Epilogue"
+  })}>
+    <AppHead />
+    <div style={{ maxWidth: 480, margin: "0 auto", background: "var(--c1)",
+      borderRadius: 14, overflow: "hidden", border: "1px solid var(--b1)",
+      boxShadow: "0 10px 32px rgba(15,15,18,.06)" }}>
+
+      {/* HERO */}
+      <div style={{ padding: 18, borderBottom: "1px solid var(--b1)", background: "var(--c2)" }}>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--cr)", letterSpacing: ".18em", fontWeight: 800 }}>◆ CREW</div>
+        <h2 style={{
+          fontFamily: "Anton, Epilogue, sans-serif", fontSize: 26, fontWeight: 400,
+          letterSpacing: ".01em", color: "var(--tx)", margin: "4px 0 4px", lineHeight: 1.1,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+        }}>{crew.name}</h2>
+        {(crew.location || crew.country) && <p style={{
+          fontSize: 12, color: "var(--dm)", fontFamily: "Epilogue", margin: 0
+        }}>{[crew.location, crew.country].filter(Boolean).join(" · ")}{crew.country && " " + countryFlag(crew.country)}</p>}
+
+        {/* Stat pillars */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--b1)" }}>
+          <div style={{ background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, padding: "10px 8px", textAlign: "center" }}>
+            <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".12em", fontWeight: 800, textTransform: "uppercase", marginBottom: 4 }}>Wins</div>
+            <div style={Object.assign({ fontSize: 17, fontWeight: 900, color: "var(--gd)" }, monoNum)}>{data.totalWins}</div>
+          </div>
+          <div style={{ background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, padding: "10px 8px", textAlign: "center" }}>
+            <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".12em", fontWeight: 800, textTransform: "uppercase", marginBottom: 4 }}>Events</div>
+            <div style={Object.assign({ fontSize: 17, fontWeight: 900, color: "var(--ac)" }, monoNum)}>{data.eventCount}</div>
+          </div>
+          <div style={{ background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, padding: "10px 8px", textAlign: "center" }}>
+            <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".12em", fontWeight: 800, textTransform: "uppercase", marginBottom: 4 }}>Members</div>
+            <div style={Object.assign({ fontSize: 17, fontWeight: 900, color: "var(--tx)" }, monoNum)}>{data.members.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ROSTER */}
+      <div style={{ padding: 14 }}>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800, marginBottom: 8, textTransform: "uppercase" }}>
+          ◆ Roster
+        </div>
+        {data.members.length === 0 ? <div style={{ fontSize: 11, color: "var(--dm)", fontStyle: "italic", textAlign: "center", padding: "12px 0" }}>No members yet.</div>
+          : <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {data.members.slice(0, 8).map(function (m) {
+              return <div key={m.id} style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 10px", background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10
+              }}>
+                <Monogram name={m.breakingName || m.fullName} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--tx)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.breakingName || m.fullName}
+                  </div>
+                  {m.primaryCrew === crew.id && <div style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--cr)", fontWeight: 700, letterSpacing: ".08em" }}>PRIMARY</div>}
+                </div>
+              </div>;
+            })}
+          </div>}
+        {data.members.length > 8 && <div style={{ fontSize: 11, color: "var(--dm)", textAlign: "center", marginTop: 6 }}>+ {data.members.length - 8} more</div>}
+
+        {/* TOP CONTRIBUTORS — wins per member (event count as sub-bar) */}
+        {data.topContrib.length > 0 && <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--b1)" }}>
+          <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800, marginBottom: 10, textTransform: "uppercase" }}>
+            ◆ Top Contributors
+          </div>
+          {(function () {
+            var maxW = Math.max.apply(null, data.topContrib.map(function (m) { return m.wins; }).concat([1]));
+            var maxE = Math.max.apply(null, data.topContrib.map(function (m) { return m.events; }).concat([1]));
+            return data.topContrib.map(function (m, i) {
+              var wPct = (m.wins / maxW) * 100;
+              var ePct = (m.events / maxE) * 100;
+              return <div key={m.id} style={{ marginBottom: i < data.topContrib.length - 1 ? 10 : 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0, marginRight: 8 }}>{m.name}</span>
+                  <span style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", flexShrink: 0 }}>
+                    <span style={{ color: "var(--gd)", fontWeight: 800 }}>{m.wins}W</span>
+                    {" · "}
+                    <span style={{ color: "var(--cr)", fontWeight: 800 }}>{m.events}E</span>
+                  </span>
+                </div>
+                <div style={{ height: 4, background: "var(--b2)", borderRadius: 2, overflow: "hidden", marginBottom: 2 }}>
+                  <div style={{ width: wPct + "%", height: "100%", background: "var(--gd)" }} aria-hidden="true" />
+                </div>
+                <div style={{ height: 2, background: "var(--b2)", borderRadius: 1, overflow: "hidden" }}>
+                  <div style={{ width: ePct + "%", height: "100%", background: "var(--cr)", opacity: 0.7 }} aria-hidden="true" />
+                </div>
+              </div>;
+            });
+          })()}
+          <div style={{ fontSize: 9, color: "var(--dm)", fontFamily: "JetBrains Mono", marginTop: 8, letterSpacing: ".08em" }}>
+            <span style={{ color: "var(--gd)" }}>━</span> Wins · <span style={{ color: "var(--cr)" }}>━</span> Events
+          </div>
+        </div>}
+
+        {/* CREW HIGHLIGHTS — approved clips from any member */}
+        {data.clips.length > 0 && <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--b1)" }}>
+          <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800, marginBottom: 8, textTransform: "uppercase" }}>
+            📺 Crew Highlights{data.clips.length > 1 ? " (" + data.clips.length + ")" : ""}
+          </div>
+          {data.clips.map(function (c, i) {
+            return <div key={c.id} style={{ marginBottom: i < data.clips.length - 1 ? 14 : 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, alignItems: "baseline" }}>
+                <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--cr)", letterSpacing: ".12em", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.label}
+                </div>
+                <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", flexShrink: 0, marginLeft: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "55%" }}>
+                  {c.subLabel}
+                </div>
+              </div>
+              <MobileAutoplayYoutube url={"https://youtu.be/" + c.ytId} title={c.label} autoplay={false} />
+            </div>;
+          })}
+        </div>}
+
+        {/* RECENT */}
+        {data.recent.length > 0 && <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--b1)" }}>
+          <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800, marginBottom: 8, textTransform: "uppercase" }}>
+            ◆ Recent Events
+          </div>
+          {data.recent.map(function (r) {
+            var topPlace = r.participants.find(function (pp) { return pp.place === 1; });
+            return <div key={r.ev.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--b1)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                <span style={{ flex: 1, fontSize: 12, fontWeight: 800, fontFamily: "Epilogue", color: "var(--tx)",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ev.name}</span>
+                {r.ev.dt && <span style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".08em" }}>
+                  {new Date(r.ev.dt).toLocaleDateString(undefined, { month: "short", day: "numeric" }).toUpperCase()}
+                </span>}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--dm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {topPlace ? <span style={{ color: "var(--gd)", fontWeight: 800 }}>🏆 {topPlace.name}</span> : r.participants.map(function (pp) { return pp.name; }).slice(0, 3).join(" · ")}
+              </div>
+            </div>;
+          })}
+        </div>}
+        <EmbedAttrib />
+      </div>
+    </div>
+  </div>;
+}
+
+function HighlightsEmbed(p) {
+  var cfg = p.config || {};
+  var profiles = p.profiles || [];
+  var crews = p.crews || [];
+  var allEvents = p.events || [];
+
+  var initialWin = ["all", "year", "month"].indexOf(cfg.window) >= 0 ? cfg.window : "month";
+  var _w = useState(initialWin), win = _w[0], setWin = _w[1];
+
+  var events = useMemo(function () {
+    return allEvents.filter(function (e) { return eventInWindow(e, win); });
+  }, [allEvents, win]);
+
+  function champOf(ev) {
+    var bk = ev.bracket;
+    return bk && bk[bk.length - 1] && bk[bk.length - 1][0] && bk[bk.length - 1][0].winner || null;
+  }
+  function profileOf(pid) { return profiles.find(function (x) { return x.id === pid; }) || null; }
+  function crewOf(cid) { return crews.find(function (x) { return x.id === cid; }) || null; }
+
+  // Same 11 datasets as HighlightsView, trimmed to top 4-5 per card for compact mobile.
+  var recentWins = useMemo(function () {
+    return events
+      .map(function (ev) {
+        var c = champOf(ev);
+        if (!c) return null;
+        var pr = c.pid ? profileOf(c.pid) : null;
+        var cr = (pr && pr.primaryCrew) ? crewOf(pr.primaryCrew) : null;
+        return { ev: ev, dancer: c.name, crew: cr ? cr.name : (c.crew || ""), pid: c.pid };
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return new Date(b.ev.dt || 0) - new Date(a.ev.dt || 0); })
+      .slice(0, 5);
+  }, [events]);
+
+  var recentKings = useMemo(function () {
+    return events
+      .filter(function (ev) { return ev.cypherKingPid; })
+      .map(function (ev) {
+        var pr = profileOf(ev.cypherKingPid);
+        return pr ? { ev: ev, dancer: pr.breakingName || pr.fullName } : null;
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return new Date(b.ev.dt || 0) - new Date(a.ev.dt || 0); })
+      .slice(0, 5);
+  }, [events]);
+
+  var recentYouthWins = useMemo(function () {
+    return recentWins.filter(function (r) {
+      var pr = r.pid ? profileOf(r.pid) : null;
+      return pr && (pr.labels || []).indexOf("Youth") >= 0;
+    });
+  }, [recentWins]);
+
+  var recentBGirlWins = useMemo(function () {
+    return recentWins.filter(function (r) {
+      var pr = r.pid ? profileOf(r.pid) : null;
+      return pr && (pr.labels || []).indexOf("BGirl") >= 0;
+    });
+  }, [recentWins]);
+
+  var topDancers = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        counts[pl.pid] = (counts[pl.pid] || 0) + 1;
+      });
+    });
+    return Object.keys(counts)
+      .map(function (pid) {
+        var pr = profileOf(pid);
+        return pr ? { name: pr.breakingName || pr.fullName, count: counts[pid] } : null;
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 5);
+  }, [events]);
+
+  var topCrews = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.crewId || seen[pl.crewId]) return;
+        seen[pl.crewId] = true;
+        counts[pl.crewId] = (counts[pl.crewId] || 0) + 1;
+      });
+    });
+    return Object.keys(counts)
+      .map(function (cid) {
+        var cr = crewOf(cid);
+        return cr ? { name: cr.name, count: counts[cid] } : null;
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 5);
+  }, [events]);
+
+  var localBreakdown = useMemo(function () {
+    var stats = {};
+    events.forEach(function (ev) {
+      var local = isLocalEvent(ev);
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        if (!stats[pl.pid]) stats[pl.pid] = { local: 0, away: 0 };
+        if (local) stats[pl.pid].local++; else stats[pl.pid].away++;
+      });
+    });
+    return Object.keys(stats)
+      .map(function (pid) {
+        var pr = profileOf(pid);
+        if (!pr) return null;
+        return Object.assign({ name: pr.breakingName || pr.fullName }, stats[pid]);
+      })
+      .filter(Boolean)
+      .filter(function (r) { return r.local + r.away >= 2; })
+      .sort(function (a, b) { return (b.local + b.away) - (a.local + a.away); })
+      .slice(0, 5);
+  }, [events]);
+
+  var topJudges = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      if (!ev.jn) return;
+      for (var i = 0; i < (ev.nj || 0); i++) {
+        var name = (ev.jn[i] || "").trim();
+        if (!name) continue;
+        counts[name] = (counts[name] || 0) + 1;
+      }
+    });
+    return Object.keys(counts)
+      .map(function (n) { return { name: n, count: counts[n] }; })
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 3);
+  }, [events]);
+
+  var rotnLeaders = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      (ev.roundsOfTheNight || []).forEach(function (r) {
+        var key = r.playerPid || r.playerId;
+        if (!key) return;
+        if (!counts[key]) counts[key] = { name: r.playerName, count: 0 };
+        counts[key].count++;
+      });
+    });
+    return Object.keys(counts).map(function (k) { return counts[k]; })
+      .sort(function (a, b) { return b.count - a.count; }).slice(0, 5);
+  }, [events]);
+
+  var topCities = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        var pr = profileOf(pl.pid);
+        if (!pr || !pr.city) return;
+        var key = pr.city + (pr.country ? ", " + pr.country : "");
+        if (!counts[key]) counts[key] = { name: key, count: 0 };
+        counts[key].count++;
+      });
+    });
+    return Object.keys(counts).map(function (k) { return counts[k]; })
+      .sort(function (a, b) { return b.count - a.count; }).slice(0, 5);
+  }, [events]);
+
+  var newcomers = useMemo(function () {
+    var totalCounts = {};
+    allEvents.forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        totalCounts[pl.pid] = (totalCounts[pl.pid] || 0) + 1;
+      });
+    });
+    var firstEv = {};
+    events.forEach(function (ev) {
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || totalCounts[pl.pid] !== 1) return;
+        if (!firstEv[pl.pid]) firstEv[pl.pid] = ev;
+      });
+    });
+    return Object.keys(firstEv).map(function (pid) {
+      var pr = profileOf(pid);
+      if (!pr) return null;
+      return { name: pr.breakingName || pr.fullName, ev: firstEv[pid] };
+    }).filter(Boolean)
+      .sort(function (a, b) { return new Date(b.ev.dt || 0) - new Date(a.ev.dt || 0); })
+      .slice(0, 5);
+  }, [events, allEvents]);
+
+  useEmbedHeight([win, events.length]);
+
+  // ── Render helpers ──
+  function Card(props) {
+    return <div style={{
+      background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10,
+      padding: 12, marginBottom: 8
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 15 }}>{props.icon}</span>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800, textTransform: "uppercase" }}>
+          {props.title}
+        </div>
+      </div>
+      {props.children}
+    </div>;
+  }
+
+  function Empty() {
+    return <div style={{ fontSize: 11, color: "var(--dm)", fontStyle: "italic", textAlign: "center", padding: "10px 0" }}>
+      No data in this window.
+    </div>;
+  }
+
+  function Row(opts) {
+    return <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "6px 0", borderBottom: opts.last ? "none" : "1px solid var(--b1)",
+      fontSize: 12, fontFamily: "Epilogue"
+    }}>
+      <span style={{ color: "var(--tx)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 8 }}>{opts.left}</span>
+      <span style={{ color: "var(--dm)", fontFamily: "JetBrains Mono", fontWeight: 700, fontSize: 11, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{opts.right}</span>
+    </div>;
+  }
+
+  function makeList(items, leftFn, rightFn) {
+    if (items.length === 0) return <Empty />;
+    return items.map(function (item, i) {
+      return <Row key={i} left={leftFn(item)} right={rightFn(item)} last={i === items.length - 1} />;
+    });
+  }
+
+  // Event-led row layout — used for "Recent X" cards where the event matters most.
+  // Top line: event name (bold). Bottom line: dancer + crew, with date chip on the right.
+  function EventRow(opts) {
+    var ev = opts.ev;
+    var dateStr = ev && ev.dt ? new Date(ev.dt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+    return <div style={{
+      padding: "8px 0", borderBottom: opts.last ? "none" : "1px solid var(--b1)"
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 800, fontFamily: "Epilogue", color: "var(--tx)",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {ev ? ev.name : "(event)"}
+        </span>
+        {dateStr && <span style={{ fontSize: 9, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".08em", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+          {dateStr.toUpperCase()}
+        </span>}
+      </div>
+      <div style={{ fontSize: 11, fontFamily: "Epilogue", color: "var(--dm)", lineHeight: 1.3,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {opts.dancer && <span style={{ color: "var(--tx)", fontWeight: 700 }}>{opts.dancer}</span>}
+        {opts.crew && <span style={{ color: "var(--cr)" }}> · {opts.crew}</span>}
+        {opts.suffix && <span> · {opts.suffix}</span>}
+      </div>
+    </div>;
+  }
+  function makeEventList(items) {
+    if (items.length === 0) return <Empty />;
+    return items.map(function (it, i) {
+      return <EventRow key={i} ev={it.ev} dancer={it.dancer || it.name} crew={it.crew} suffix={it.suffix} last={i === items.length - 1} />;
+    });
+  }
+
+  return <div style={Object.assign({}, CV, {
+    background: "var(--bg)", padding: 14, fontFamily: "Epilogue", minHeight: 200
+  })}>
+    <AppHead />
+
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em", fontWeight: 800 }}>✨ CYPHER NET HIGHLIGHTS</div>
+      <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 2 }}>What's happening across the scene.</div>
+    </div>
+
+    {/* Time filter — compact horizontal segmented control */}
+    <div style={{ display: "flex", gap: 4, marginBottom: 12, background: "var(--c1)", padding: 3, border: "1px solid var(--b1)", borderRadius: 8 }}>
+      {[
+        { id: "month", label: "Month" },
+        { id: "year", label: "Year" },
+        { id: "all", label: "All Time" }
+      ].map(function (o) {
+        var active = win === o.id;
+        return <button key={o.id} onClick={function () { setWin(o.id); }} style={{
+          flex: 1, padding: "7px 4px",
+          background: active ? "var(--ac)" : "transparent",
+          color: active ? "#fff" : "var(--dm)",
+          border: "none", fontSize: 10, fontFamily: "JetBrains Mono", fontWeight: 800,
+          letterSpacing: ".08em", textTransform: "uppercase",
+          borderRadius: 6, cursor: "pointer", touchAction: "manipulation"
+        }}>{o.label}</button>;
+      })}
+    </div>
+
+    <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", textAlign: "right", marginBottom: 8, fontVariantNumeric: "tabular-nums" }}>
+      {events.length} EVENT{events.length === 1 ? "" : "S"} IN WINDOW
+    </div>
+
+    <Card icon="🏆" title="Recent Wins">
+      {makeEventList(recentWins)}
+    </Card>
+
+    <Card icon="👑" title="Cypher Kings / Queens">
+      {makeEventList(recentKings)}
+    </Card>
+
+    <Card icon="🧒" title="Recent Youth Wins">
+      {makeEventList(recentYouthWins)}
+    </Card>
+
+    <Card icon="💃" title="Recent BGirl Wins">
+      {makeEventList(recentBGirlWins)}
+    </Card>
+
+    <Card icon="🌱" title="Newcomers (1st Battle)">
+      {makeEventList(newcomers)}
+    </Card>
+
+    <Card icon="🌟" title="Round of the Night Leaders">
+      {makeList(rotnLeaders, function (r) { return <b>{r.name}</b>; }, function (r) { return r.count + "×"; })}
+    </Card>
+
+    <Card icon="📅" title="Most Events — Dancers">
+      {makeList(topDancers, function (r) { return <b>{r.name}</b>; }, function (r) { return r.count + " events"; })}
+    </Card>
+
+    <Card icon="🎭" title="Most Events — Crews">
+      {makeList(topCrews, function (r) { return <b>{r.name}</b>; }, function (r) { return r.count + " events"; })}
+    </Card>
+
+    <Card icon="🏠" title="Local vs Non-Local">
+      <div style={{ fontSize: 9, color: "var(--dm)", marginBottom: 4, fontFamily: "JetBrains Mono" }}>
+        GREATER VANCOUVER VS AWAY
+      </div>
+      {makeList(localBreakdown,
+        function (r) { return <b>{r.name}</b>; },
+        function (r) { return r.local + " · " + r.away; })}
+    </Card>
+
+    <Card icon="⚖️" title="Top Judges (Top 3)">
+      {makeList(topJudges, function (r) { return <b>{r.name}</b>; }, function (r) { return r.count + " events"; })}
+    </Card>
+
+    <Card icon="🗺" title="Top Cities">
+      {makeList(topCities, function (r) { return <b>{r.name}</b>; }, function (r) { return r.count + " dancers"; })}
+    </Card>
+    <EmbedAttrib />
+  </div>;
 }
 
 function LeaderboardEmbed(p) {
@@ -3871,10 +6487,11 @@ function LeaderboardEmbed(p) {
   function valueOf(u) {
     if (sort === "events") return u.events || u.eventsAttended || 0;
     if (sort === "cypherKings") return "👑 " + (u.cypherKings || 0);
-    if (sort === "dpr") return u.dpr || 0;
     if (sort === "wins") return u.wins || 0;
     if (sort === "winPct") return (u.winPct || 0) + "%";
-    return (u.standings || 0).toFixed(1);
+    if (sort === "standings") return (u.standings || 0).toFixed(1);
+    // Default: wins
+    return u.wins || 0;
   }
 
   function streakBadge(u) {
@@ -4178,58 +6795,104 @@ function LeaderboardEmbed(p) {
   </div>;
 }
 
-function EmbedHelp() {
+function EmbedHelp(p) {
   // Pre-fill from URL params if present (e.g., "Embed this leaderboard" deep links from RankingsView)
   var initial = (function () {
     if (typeof window === "undefined") return {};
     try {
       var sp = new URLSearchParams(window.location.search);
       return {
+        kind: sp.get("kind") || "leaderboard",  // 'leaderboard' | 'live-event' | 'dancer-profile'
         mode: sp.get("mode") || "players",
         country: sp.get("country") || "All",
-        sort: sp.get("sort") || "dpr",
-        limit: sp.get("limit") || "10",
+        sort: sp.get("sort") || "wins",
+        limit: sp.get("limit") || "",
         theme: sp.get("theme") === "light" ? "light" : "dark",
         compact: sp.get("compact") === "1",
         win: sp.get("window") || "all",
         fmt: sp.get("format") || "all",
         q: sp.get("q") || "",
         interactive: sp.get("interactive") !== "0",
-        view: sp.get("view") || "dashboard"
+        view: sp.get("view") || "dashboard",
+        liveEventId: sp.get("event") || "",
+        dancerId: sp.get("dancer") || "",
+        crewId: sp.get("crew") || "",
+        dancerTab: sp.get("tab") || "overview"
       };
     } catch (e) { return {}; }
   })();
+  var _k = useState(initial.kind || "leaderboard"), kind = _k[0], setKind = _k[1];
+  var _evId = useState(initial.liveEventId || ""), liveEventId = _evId[0], setLiveEventId = _evId[1];
+  var _dId = useState(initial.dancerId || ""), dancerId = _dId[0], setDancerId = _dId[1];
+  var _cId = useState(initial.crewId || ""), embedCrewId = _cId[0], setEmbedCrewId = _cId[1];
+  var _dTab = useState(initial.dancerTab || "overview"), dancerTab = _dTab[0], setDancerTab = _dTab[1];
   var _vw = useState(initial.view || "dashboard"), viewSel = _vw[0], setViewSel = _vw[1];
   var _m = useState(initial.mode || "players"), mode = _m[0], setMode = _m[1];
   var _c = useState(initial.country || "All"), country = _c[0], setCountry = _c[1];
   var _s = useState(initial.sort || "dpr"), sort = _s[0], setSort = _s[1];
-  var _l = useState(initial.limit || "10"), limit = _l[0], setLimit = _l[1];
+  var _l = useState(initial.limit || (initial.kind === "ticker" ? "" : "10")), limit = _l[0], setLimit = _l[1];
   var _t = useState(initial.theme || "dark"), theme = _t[0], setTheme = _t[1];
   var _cp = useState(!!initial.compact), compact = _cp[0], setCompact = _cp[1];
   var _wn = useState(initial.win || "all"), winSel = _wn[0], setWinSel = _wn[1];
   var _fm = useState(initial.fmt || "all"), fmtSel = _fm[0], setFmtSel = _fm[1];
   var _qq = useState(initial.q || ""), q = _qq[0], setQ = _qq[1];
   var _it = useState(initial.interactive !== false), interactive = _it[0], setInteractive = _it[1];
-  var _w = useState(viewSel === "dashboard" ? "880" : "380"), w = _w[0], setW = _w[1];
-  var _h = useState(viewSel === "dashboard" ? "1200" : "700"), h = _h[0], setH = _h[1];
+  // Fixed 360px width across all widget kinds — fits the smallest common mobile viewport
+  // and centers cleanly on wider screens. Height is what changes per widget.
+  var _initSize = (function () {
+    if (initial.kind === "live-event") return { w: "360", h: "900" };
+    if (initial.kind === "dancer-profile") return { w: "360", h: "820" };
+    if (initial.kind === "highlights") return { w: "360", h: "2400" };
+    if (initial.kind === "crew") return { w: "360", h: "900" };
+    if (initial.kind === "event-recap") return { w: "360", h: "1000" };
+    if (initial.kind === "archive") return { w: "360", h: "1200" };
+    if (initial.kind === "ticker") return { w: "800", h: "48" };
+    // leaderboard
+    return viewSel === "dashboard" ? { w: "360", h: "1800" } : { w: "360", h: "850" };
+  })();
+  var _w = useState(_initSize.w), w = _w[0], setW = _w[1];
+  var _h = useState(_initSize.h), h = _h[0], setH = _h[1];
   var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
 
   var origin = typeof window !== "undefined" ? window.location.origin : "https://cyphernet.vercel.app";
   var sp = new URLSearchParams();
-  sp.set("embed", "leaderboard");
-  if (viewSel !== "dashboard") sp.set("view", viewSel);
-  sp.set("mode", mode);
-  if (country !== "All") sp.set("country", country);
-  sp.set("sort", sort);
-  sp.set("limit", limit);
-  sp.set("theme", theme);
-  if (compact) sp.set("compact", "1");
-  if (winSel && winSel !== "all") sp.set("window", winSel);
-  if (fmtSel && fmtSel !== "all") sp.set("format", fmtSel);
-  if (q && q.trim()) sp.set("q", q.trim());
-  if (!interactive) sp.set("interactive", "0");
+  if (kind === "leaderboard") {
+    sp.set("embed", "leaderboard");
+    if (viewSel !== "dashboard") sp.set("view", viewSel);
+    sp.set("mode", mode);
+    if (country !== "All") sp.set("country", country);
+    sp.set("sort", sort);
+    sp.set("limit", limit);
+    sp.set("theme", theme);
+    if (compact) sp.set("compact", "1");
+    if (winSel && winSel !== "all") sp.set("window", winSel);
+    if (fmtSel && fmtSel !== "all") sp.set("format", fmtSel);
+    if (q && q.trim()) sp.set("q", q.trim());
+    if (!interactive) sp.set("interactive", "0");
+  } else if (kind === "live-event") {
+    sp.set("embed", "live-event");
+    if (liveEventId) sp.set("event", liveEventId);
+  } else if (kind === "dancer-profile") {
+    sp.set("embed", "dancer-profile");
+    if (dancerId) sp.set("dancer", dancerId);
+    if (dancerTab && dancerTab !== "overview") sp.set("tab", dancerTab);
+  } else if (kind === "highlights") {
+    sp.set("embed", "highlights");
+  } else if (kind === "crew") {
+    sp.set("embed", "crew");
+    if (embedCrewId) sp.set("crew", embedCrewId);
+  } else if (kind === "event-recap") {
+    sp.set("embed", "event-recap");
+    if (liveEventId) sp.set("event", liveEventId);
+  } else if (kind === "archive") {
+    sp.set("embed", "archive");
+    if (liveEventId) sp.set("event", liveEventId);
+  } else if (kind === "ticker") {
+    sp.set("embed", "ticker");
+    if (limit && parseInt(limit, 10) > 0) sp.set("speed", limit);
+  }
   var src = origin + "/?" + sp.toString();
-  var iframe = '<iframe src="' + src + '" width="' + w + '" height="' + h + '" frameborder="0" style="border:none;border-radius:12px;overflow:hidden;background:transparent"></iframe>';
+  var iframe = '<iframe src="' + src + '" width="' + w + '" height="' + h + '" frameborder="0" style="border:none;border-radius:12px;overflow:hidden;background:transparent;display:block;max-width:100%"></iframe>';
 
   function copyCode() {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -4247,13 +6910,196 @@ function EmbedHelp() {
     <AppHead />
     <div style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em" }}>📺 EMBED WIDGET</div>
-        <h1 style={{ fontFamily: "Epilogue", fontSize: 28, color: "var(--tx)", marginBottom: 14 }}>Leaderboard Embed</h1>
+        <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".15em" }}>📺 EMBED BUILDER</div>
+        <h1 style={{ fontFamily: "Epilogue", fontSize: 28, color: "var(--tx)", marginBottom: 14 }}>
+          {kind === "leaderboard" ? "Leaderboard Embed"
+            : kind === "live-event" ? "Live Event Embed"
+            : kind === "dancer-profile" ? "Dancer Profile Embed"
+            : kind === "crew" ? "Crew Embed"
+            : kind === "event-recap" ? "Event Recap Embed"
+            : kind === "archive" ? "Event Archive Embed"
+            : kind === "ticker" ? "Live Ticker Embed"
+            : "Highlights Embed"}
+        </h1>
         <p style={{ fontSize: 13, color: "var(--dm)", marginBottom: 16, lineHeight: 1.5 }}>
-          Drop this iframe on any website — your blog, event page, crew site, anywhere. It updates live as you score matches. No login or tokens needed.
+          {kind === "leaderboard"
+            ? "Drop this iframe on any website — your blog, event page, crew site, anywhere. It updates live as you score matches."
+            : kind === "live-event"
+            ? "Show the current live event with countdown → prelims roster → bracket → champion. Auto-picks the most relevant event, or lock to a specific one. Updates in real time as the admin scores matches."
+            : kind === "dancer-profile"
+            ? "Show a single dancer's profile — hero card, stat pillars, battle history, media. Updates live as the dancer's stats change."
+            : kind === "crew"
+            ? "Crew stat page — hero card, roster grid, aggregate wins/events, recent placements. Perfect for crew socials and dedicated crew pages."
+            : kind === "event-recap"
+            ? "Post-event summary — champion banner, podium (🥇🥈🥉), Round of the Night, full participant list. Drop this on the event's recap page after it's decided."
+            : kind === "archive"
+            ? "Browsable index of every decided event. Tap a row to drill into the champion banner, recap video (when set in the event's Stream details), podium, and Round of the Night. Indexable by search engines on third-party pages."
+            : kind === "ticker"
+            ? "Broadcast-style scrolling ribbon — completed match results loop across the strip. Drop it at the top or bottom of any page (32–48px tall). Pause on hover. Adjustable scroll speed."
+            : "11 analytic cards (Recent Wins, Cypher Kings, Newcomers, Round of the Night Leaders, etc.) with an inline All / Year / Month filter. Auto-updates as the scene evolves."}
         </p>
 
+        {/* Widget kind selector */}
         <Crd>
+          <Lbl>Widget</Lbl>
+          <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+            {[
+              { id: "leaderboard", label: "🏆 Leaderboard" },
+              { id: "live-event", label: "● Live Event" },
+              { id: "dancer-profile", label: "👤 Dancer" },
+              { id: "crew", label: "🎭 Crew" },
+              { id: "event-recap", label: "📜 Event Recap" },
+              { id: "archive", label: "🏆 Archive" },
+              { id: "ticker", label: "📡 Ticker" },
+              { id: "highlights", label: "✨ Highlights" }
+            ].map(function (k) {
+              var active = kind === k.id;
+              return <button key={k.id} onClick={function () {
+                setKind(k.id);
+                // Default sizes per kind — width is locked at 360 across all widgets;
+                // height varies based on widget content.
+                setW("360");
+                if (k.id === "leaderboard") setH(viewSel === "dashboard" ? "1800" : "850");
+                else if (k.id === "live-event") setH("900");
+                else if (k.id === "dancer-profile") setH("820");
+                else if (k.id === "crew") setH("900");
+                else if (k.id === "event-recap") setH("1000");
+                else if (k.id === "archive") setH("1200");
+                else if (k.id === "ticker") { setH("48"); setW("800"); setLimit(""); }
+                else if (k.id === "highlights") setH("2400");
+              }} style={{
+                flex: "1 1 calc(50% - 4px)", padding: "10px 8px", minWidth: 0,
+                background: active ? "var(--ac)" : "transparent",
+                color: active ? "#ffffff" : "var(--dm)",
+                border: "1px solid " + (active ? "var(--ac)" : "var(--b1)"),
+                fontSize: 12, fontFamily: "JetBrains Mono", fontWeight: 700,
+                letterSpacing: ".06em", cursor: "pointer", borderRadius: 6,
+                touchAction: "manipulation"
+              }}>{k.label}</button>;
+            })}
+          </div>
+        </Crd>
+
+        {kind === "live-event" && <Crd>
+          <Lbl>Event</Lbl>
+          <select value={liveEventId} onChange={function (e) { setLiveEventId(e.target.value); }} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+          }}>
+            <option value="">— Auto-pick most relevant —</option>
+            {(p.events || []).slice().sort(function (a, b) {
+              var aT = a.dt ? new Date(a.dt).getTime() : 0;
+              var bT = b.dt ? new Date(b.dt).getTime() : 0;
+              return bT - aT;
+            }).map(function (ev) {
+              var dt = ev.dt ? new Date(ev.dt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+              return <option key={ev.id} value={ev.id}>{ev.name + (dt ? " — " + dt : "")}</option>;
+            })}
+          </select>
+          <div style={{ fontSize: 11, color: "var(--dm)", marginTop: 8, lineHeight: 1.4 }}>
+            Auto-pick prefers bracket-running &gt; prelims &gt; upcoming &gt; recent champion (24h grace). Pick a specific event to lock it.
+          </div>
+        </Crd>}
+
+        {kind === "crew" && <Crd>
+          <Lbl>Crew</Lbl>
+          <select value={embedCrewId} onChange={function (e) { setEmbedCrewId(e.target.value); }} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+          }}>
+            <option value="">— Select a crew —</option>
+            {(p.crews || []).slice().sort(function (a, b) {
+              return (a.name || "").localeCompare(b.name || "");
+            }).map(function (cr) {
+              return <option key={cr.id} value={cr.id}>{cr.name}</option>;
+            })}
+          </select>
+        </Crd>}
+
+        {kind === "event-recap" && <Crd>
+          <Lbl>Event</Lbl>
+          <select value={liveEventId} onChange={function (e) { setLiveEventId(e.target.value); }} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+          }}>
+            <option value="">— Select a completed event —</option>
+            {(p.events || []).slice().sort(function (a, b) {
+              var aT = a.dt ? new Date(a.dt).getTime() : 0;
+              var bT = b.dt ? new Date(b.dt).getTime() : 0;
+              return bT - aT;
+            }).map(function (ev) {
+              var dt = ev.dt ? new Date(ev.dt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+              return <option key={ev.id} value={ev.id}>{ev.name + (dt ? " — " + dt : "")}</option>;
+            })}
+          </select>
+        </Crd>}
+
+        {kind === "archive" && <Crd>
+          <Lbl>Deep-link Event (optional)</Lbl>
+          <select value={liveEventId} onChange={function (e) { setLiveEventId(e.target.value); }} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+          }}>
+            <option value="">— Index view (list all events) —</option>
+            {(p.events || []).slice().sort(function (a, b) {
+              var aT = a.dt ? new Date(a.dt).getTime() : 0;
+              var bT = b.dt ? new Date(b.dt).getTime() : 0;
+              return bT - aT;
+            }).map(function (ev) {
+              var dt = ev.dt ? new Date(ev.dt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+              return <option key={ev.id} value={ev.id}>{ev.name + (dt ? " — " + dt : "")}</option>;
+            })}
+          </select>
+          <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 6, lineHeight: 1.4 }}>
+            Leave blank for the full browsable index. Pick an event to drop visitors straight into that event's archive page.
+          </div>
+        </Crd>}
+
+        {kind === "ticker" && <Crd>
+          <Lbl>Scroll Speed (seconds per pass)</Lbl>
+          <input type="number" min="8" max="120" value={limit} onChange={function (e) { setLimit(e.target.value); }} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+          }} placeholder="30 (default)" />
+          <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 6, lineHeight: 1.4 }}>
+            Lower = faster scroll. Clamped to 8–120s. Hovering the ticker pauses it.
+          </div>
+          <div style={{ fontSize: 10, color: "var(--dm)", marginTop: 10, lineHeight: 1.4, padding: 8, background: "var(--c2)", borderRadius: 6, border: "1px dashed var(--b1)" }}>
+            <b>Tip:</b> the ticker looks best wider than 360px. Resize the iframe width below to span a header or footer strip — try 800 or "100%" for full-width banner.
+          </div>
+        </Crd>}
+
+        {kind === "dancer-profile" && <Crd>
+          <Lbl>Dancer</Lbl>
+          <select value={dancerId} onChange={function (e) { setDancerId(e.target.value); }} style={{
+            width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+          }}>
+            <option value="">— Select a dancer —</option>
+            {(p.profiles || []).slice().sort(function (a, b) {
+              return (a.breakingName || "").localeCompare(b.breakingName || "");
+            }).map(function (pr) {
+              return <option key={pr.id} value={pr.id}>{pr.breakingName || pr.fullName || "(unnamed)"}</option>;
+            })}
+          </select>
+          <Lbl>Default Tab</Lbl>
+          <div style={{ display: "flex", gap: 6 }}>
+            {["overview", "history", "media"].map(function (t) {
+              var active = dancerTab === t;
+              return <button key={t} onClick={function () { setDancerTab(t); }} style={{
+                flex: 1, padding: "9px 6px",
+                background: active ? "var(--tx)" : "transparent",
+                color: active ? "var(--bg)" : "var(--dm)",
+                border: "1px solid " + (active ? "var(--tx)" : "var(--b1)"),
+                fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700,
+                letterSpacing: ".08em", cursor: "pointer", borderRadius: 6, textTransform: "uppercase",
+                touchAction: "manipulation"
+              }}>{t}</button>;
+            })}
+          </div>
+        </Crd>}
+
+        {kind === "leaderboard" && <Crd>
           <Lbl>View</Lbl>
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             <button onClick={function () { setViewSel("dashboard"); }} style={{
@@ -4337,8 +7183,8 @@ function EmbedHelp() {
               width: "100%", padding: 10, borderRadius: 6, background: "var(--c2)",
               color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue", marginBottom: 10
             }}>
-              <option value="dpr">DPR</option>
               <option value="wins">Wins</option>
+              <option value="events">Events Attended</option>
               <option value="winPct">Win %</option>
               <option value="standings">Avg Score</option>
             </select>
@@ -4362,17 +7208,6 @@ function EmbedHelp() {
             </div>
           </div>
 
-          <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <Lbl>Width (px)</Lbl>
-              <Inp value={w} onChange={setW} placeholder="380" />
-            </div>
-            <div style={{ flex: 1 }}>
-              <Lbl>Height (px)</Lbl>
-              <Inp value={h} onChange={setH} placeholder="700" />
-            </div>
-          </div>
-
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: "var(--dm)", cursor: "pointer" }}>
             <input type="checkbox" checked={compact} onChange={function (e) { setCompact(e.target.checked); }} />
             Compact (no podium — just a list)
@@ -4381,6 +7216,23 @@ function EmbedHelp() {
             <input type="checkbox" checked={interactive} onChange={function (e) { setInteractive(e.target.checked); }} />
             Interactive filters inside the widget (viewers can switch mode / window / search)
           </label>
+        </Crd>}
+
+        <Crd>
+          <Lbl>Iframe Size</Lbl>
+          <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 10, lineHeight: 1.4 }}>
+            Width is locked at <b>360px</b> (smallest common mobile viewport — fits on every phone, centers cleanly on desktop). Adjust height per widget if content gets clipped.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginBottom: 4 }}>WIDTH (PX)</div>
+              <Inp value={w} onChange={setW} placeholder="360" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginBottom: 4 }}>HEIGHT (PX)</div>
+              <Inp value={h} onChange={setH} placeholder="900" />
+            </div>
+          </div>
         </Crd>
 
         <Crd>
@@ -4403,7 +7255,7 @@ function EmbedHelp() {
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginBottom: 8 }}>↓ LIVE PREVIEW</div>
         <iframe src={src} width={w} height={h} frameBorder="0"
-          style={{ border: "1px solid var(--b1)", borderRadius: 12, background: "transparent", maxWidth: "100%" }} />
+          style={{ border: "1px solid var(--b1)", borderRadius: 12, background: "transparent", maxWidth: "100%", display: "block" }} />
       </div>
     </div>
     <EmbedDebugger info={{
@@ -4414,443 +7266,6 @@ function EmbedHelp() {
   </div>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// RANKINGS (improved: podium, placement chips, label filter)
-// ═══════════════════════════════════════════════════════════════
-function RankingsView(p) {
-  var _v = useState("dashboard"), view = _v[0], setView = _v[1];
-  var _ex = useState(null), expandedRowId = _ex[0], setExpandedRowId = _ex[1];
-  var _pg = useState(25), visibleCount = _pg[0], setVisibleCount = _pg[1];
-  var _a = useState("players"), mode = _a[0], setMode = _a[1];
-  var _b = useState("dpr"), sort = _b[0], setSort = _b[1];
-  var _c = useState(null), labelFilter = _c[0], setLabelFilter = _c[1];
-  var _cf = useState("All"), countryFilter = _cf[0], setCountryFilter = _cf[1];
-  var _w = useState("all"), winFilter = _w[0], setWinFilter = _w[1];
-  var _fm = useState("all"), fmtFilter = _fm[0], setFmtFilter = _fm[1];
-  var _q = useState(""), q = _q[0], setQ = _q[1];
-
-  // Recompute stats when window or format filters narrow the event set
-  var fStats = useMemo(function () {
-    if ((winFilter === "all" || !winFilter) && (fmtFilter === "all" || !fmtFilter)) {
-      return { pR: p.pR, cR: p.cR, cityR: p.cityR, stateR: p.stateR, countryR: p.countryR };
-    }
-    var fe = (p.events || []).filter(function (e) {
-      return eventInWindow(e, winFilter) && eventInFormat(e, fmtFilter);
-    });
-    return calcStats(fe, p.extEvents || [], p.profiles || [], p.crews || []);
-  }, [p.pR, p.cR, p.cityR, p.stateR, p.countryR, p.events, p.extEvents, p.profiles, p.crews, winFilter, fmtFilter]);
-
-  var sortFns = {
-    dpr: function (a, b2) { return (b2.dpr || 0) - (a.dpr || 0); },
-    wins: function (a, b2) { return (b2.wins || 0) - (a.wins || 0); },
-    winPct: function (a, b2) { return (b2.winPct || 0) - (a.winPct || 0); },
-    standings: function (a, b2) { return (b2.standings || 0) - (a.standings || 0); },
-    events: function (a, b2) { return (b2.events || b2.eventsAttended || 0) - (a.events || a.eventsAttended || 0); }
-  };
-
-  // Build judges leaderboard from events' jn maps
-  var judgesR = useMemo(function () {
-    var map = {};
-    (p.events || []).forEach(function (ev) {
-      if (!ev.jn) return;
-      for (var i = 0; i < (ev.nj || 0); i++) {
-        var name = (ev.jn[i] || "").trim();
-        if (!name) continue;
-        if (!map[name]) map[name] = { id: name, name: name, events: 0 };
-        map[name].events += 1;
-      }
-    });
-    return Object.keys(map).map(function (k) { return map[k]; });
-  }, [p.events]);
-
-  var base;
-  if (mode === "players") {
-    base = (fStats.pR || []).filter(function (x) {
-      if (!(x.dpr > 0 || x.eventsAttended > 0)) return false;
-      if (labelFilter && !(x.labels || []).includes(labelFilter)) return false;
-      if (countryFilter !== "All" && x.country !== countryFilter) return false;
-      return true;
-    });
-  } else if (mode === "crews") {
-    base = (fStats.cR || []).filter(function (x) { return x.dpr > 0 || x.eventsCount > 0; });
-  } else if (mode === "cities") {
-    base = (fStats.cityR || []).filter(function (x) {
-      if (!(x.dpr > 0 || x.events > 0)) return false;
-      if (countryFilter !== "All" && !(x.name || "").endsWith(", " + countryFilter)) return false;
-      return true;
-    });
-  } else if (mode === "states") {
-    base = (fStats.stateR || []).filter(function (x) {
-      if (!(x.dpr > 0 || x.events > 0)) return false;
-      if (countryFilter !== "All" && !(x.name || "").endsWith(", " + countryFilter)) return false;
-      return true;
-    });
-  } else if (mode === "countries") {
-    base = (fStats.countryR || []).filter(function (x) { return x.dpr > 0 || x.events > 0; });
-  } else if (mode === "kings") {
-    base = (fStats.pR || []).filter(function (x) { return (x.cypherKings || 0) > 0; });
-  } else if (mode === "judges") {
-    base = judgesR.filter(function (x) { return x.events > 0; });
-  }
-
-  // Search filter — matches name or crew
-  if (q && q.trim()) {
-    var qlc = q.toLowerCase().trim();
-    base = (base || []).filter(function (u) {
-      return matchesSearch(u, qlc);
-    });
-  }
-
-  var effSort = mode === "judges" ? "events" : (mode === "kings" ? "cypherKings" : sort);
-  var effSortFn = makeSorter(effSort);
-  var fullSorted = (base || []).slice().sort(effSortFn);
-  var effectiveCount = Math.min(visibleCount, fullSorted.length);
-  var list = fullSorted.slice(0, effectiveCount);
-  var hasMore = effectiveCount < fullSorted.length;
-
-  // Country options derived from profiles
-  var countries = ["All"];
-  (p.profiles || []).forEach(function (pr) {
-    if (pr.country && countries.indexOf(pr.country) === -1) countries.push(pr.country);
-  });
-  countries.sort(function (a, b) { return a === "All" ? -1 : b === "All" ? 1 : a.localeCompare(b); });
-
-  var MODE_TABS = [
-    { id: "players", l: "Breakers", col: "var(--ac)", bg: "var(--ac2)" },
-    { id: "crews", l: "Crews", col: "var(--cr)", bg: "var(--cr2)" },
-    { id: "kings", l: "Kings", col: "var(--gd)", bg: "var(--gd2)" },
-    { id: "judges", l: "Judges", col: "var(--jd)", bg: "var(--jd2)" },
-    { id: "cities", l: "Cities", col: "var(--jd)", bg: "var(--jd2)" }
-  ];
-  var SORT_TABS = mode === "judges" ? [
-    { id: "events", l: "Events", col: "var(--gd)", bg: "var(--gd2)" }
-  ] : mode === "kings" ? [
-    { id: "cypherKings", l: "👑 Crowns", col: "var(--gd)", bg: "var(--gd2)" }
-  ] : [
-    { id: "dpr", l: "DPR", col: "var(--gd)", bg: "var(--gd2)" },
-    { id: "wins", l: "Wins", col: "var(--ac)", bg: "var(--ac2)" },
-    { id: "winPct", l: "Win %", col: "var(--gn)", bg: "var(--gn2)" },
-    { id: "standings", l: "Avg Score", col: "var(--jd)", bg: "var(--jd2)" }
-  ];
-
-  var sortVal = SORT_TABS.find(function (s) { return s.id === effSort; }) || SORT_TABS[0];
-
-  function valueOf(u) {
-    if (effSort === "events") return u.events || u.eventsAttended || 0;
-    if (effSort === "cypherKings") return "👑 " + (u.cypherKings || 0);
-    if (effSort === "dpr") return u.dpr || 0;
-    if (effSort === "wins") return u.wins || 0;
-    if (effSort === "winPct") return (u.winPct || 0) + "%";
-    return (u.standings || 0).toFixed(1);
-  }
-
-  // Streak indicator — 🔥 for 3+ wins in last 5 events, 📈 for 2 wins, else null
-  function streakBadge(u) {
-    if (mode !== "players" && mode !== "kings") return null;
-    var pl = u.placements || [];
-    if (pl.length < 3) return null;
-    var lastFive = pl.slice(-5);
-    var wins = lastFive.filter(function (x) { return x.pl === 1; }).length;
-    if (wins >= 3) return { emoji: "🔥", title: wins + " wins in last 5" };
-    if (wins >= 2) return { emoji: "📈", title: wins + " wins in last 5" };
-    return null;
-  }
-
-  function rowMetaText(u) {
-    if (mode === "players") return null;
-    if (mode === "crews") return u.eventsCount + " events · " + u.wins + " wins · " + u.winPct + "% win";
-    if (mode === "judges") return u.events + " events judged";
-    return (u.players || 0) + " breakers · " + (u.events || 0) + " entries · " + (u.wins || 0) + " wins";
-  }
-
-  function sparklineData(u) {
-    if (mode === "players" && u.placements) {
-      return u.placements.slice(-8).map(function (pl) { return pl.pts || 0; });
-    }
-    return null;
-  }
-
-  var showCountryFilter = mode === "players" || mode === "cities" || mode === "states";
-  var showPodium = list.length >= 3;
-
-  return (<div style={{ animation: "fu .3s ease" }}>
-    <Back onClick={p.onBack} />
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
-      <h2 style={{ fontFamily: "Epilogue", fontSize: 26, color: "var(--tx)" }}>Rankings</h2>
-      <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--c2)", border: "1px solid var(--b1)" }}>
-        <button onClick={function () { setView("dashboard"); }} style={{
-          padding: "6px 12px",
-          background: view === "dashboard" ? "var(--tx)" : "transparent",
-          color: view === "dashboard" ? "var(--bg)" : "var(--dm)",
-          border: "none", fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700,
-          letterSpacing: ".1em", cursor: "pointer"
-        }}>◫ DASHBOARD</button>
-        <button onClick={function () { setView("list"); }} style={{
-          padding: "6px 12px",
-          background: view === "list" ? "var(--tx)" : "transparent",
-          color: view === "list" ? "var(--bg)" : "var(--dm)",
-          border: "none", fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700,
-          letterSpacing: ".1em", cursor: "pointer"
-        }}>≡ DEEP DIVE</button>
-      </div>
-    </div>
-
-    {view === "dashboard" && <LeaderboardDashboard
-      pR={fStats.pR} cR={fStats.cR} cityR={fStats.cityR} stateR={fStats.stateR}
-      countryR={fStats.countryR} events={p.events} />}
-
-    {view === "list" && <>
-    <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-      <SegmentedToggle
-        options={MODE_TABS.map(function (t) { return { id: t.id, l: t.l }; })}
-        value={mode} onChange={setMode} variant="neutral" />
-      <SegmentedToggle
-        options={SORT_TABS.map(function (s) { return { id: s.id, l: s.l }; })}
-        value={effSort} onChange={setSort} variant="primary" />
-      {showCountryFilter && countries.length > 1 && <select
-        value={countryFilter}
-        onChange={function (e) { setCountryFilter(e.target.value); }}
-        style={{
-          padding: "7px 10px", borderRadius: 8,
-          background: countryFilter === "All" ? "var(--c2)" : "var(--c1)",
-          color: countryFilter === "All" ? "var(--dm)" : "var(--tx)",
-          border: "1px solid var(--b1)",
-          fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 700, cursor: "pointer",
-          letterSpacing: ".05em"
-        }}>
-        {countries.map(function (c) {
-          return <option key={c} value={c}>{c === "All" ? "All countries" : c}</option>;
-        })}
-      </select>}
-    </div>
-
-    {/* Window + Format filter chips */}
-    {(mode === "players" || mode === "crews" || mode === "kings" || mode === "judges") && <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-      {[
-        { id: "all", l: "All-time" },
-        { id: "year", l: "This year" },
-        { id: "6mo", l: "6 months" },
-        { id: "30d", l: "30 days" }
-      ].map(function (w) {
-        var active = winFilter === w.id;
-        return <button key={w.id} onClick={function () { setWinFilter(w.id); }} style={{
-          padding: "5px 11px", borderRadius: 6,
-          border: "1px solid " + (active ? "var(--ac)" : "var(--b1)"),
-          background: active ? "var(--ac2)" : "transparent",
-          color: active ? "var(--ac)" : "var(--dm)",
-          fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "JetBrains Mono", letterSpacing: ".05em"
-        }}>⏱ {w.l}</button>;
-      })}
-    </div>}
-    {(mode === "players" || mode === "crews" || mode === "kings") && <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-      {[
-        { id: "all", l: "All formats" },
-        { id: "solo", l: "Solo" },
-        { id: "2v2", l: "2v2" },
-        { id: "3v3", l: "3v3" },
-        { id: "4v4", l: "4v4" },
-        { id: "crew", l: "Crew" },
-        { id: "draft", l: "Draft" },
-        { id: "specialty", l: "Specialty" }
-      ].map(function (f) {
-        var active = fmtFilter === f.id;
-        return <button key={f.id} onClick={function () { setFmtFilter(f.id); }} style={{
-          padding: "5px 11px", borderRadius: 6,
-          border: "1px solid " + (active ? "var(--cr)" : "var(--b1)"),
-          background: active ? "var(--cr2)" : "transparent",
-          color: active ? "var(--cr)" : "var(--dm)",
-          fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "JetBrains Mono", letterSpacing: ".05em"
-        }}>{f.l}</button>;
-      })}
-    </div>}
-
-    {/* Search bar */}
-    <div style={{ marginBottom: 12, position: "relative" }}>
-      <input value={q} onChange={function (e) { setQ(e.target.value); }}
-        placeholder={"Search " + (mode === "crews" ? "crews" : mode === "judges" ? "judges" : mode === "kings" ? "kings" : mode === "cities" ? "cities" : mode === "states" ? "states" : mode === "countries" ? "countries" : "breakers") + "…"}
-        style={{
-          width: "100%", padding: "10px 14px 10px 36px", fontSize: 13,
-          background: "var(--inp)", border: "1px solid var(--b1)", borderRadius: 8,
-          color: "var(--tx)", outline: "none", fontFamily: "Epilogue", boxSizing: "border-box"
-        }}
-        onFocus={function (e) { e.target.style.borderColor = "var(--ac)"; }}
-        onBlur={function (e) { e.target.style.borderColor = "var(--b1)"; }} />
-      <span style={{
-        position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
-        color: "var(--dm)", fontSize: 13, pointerEvents: "none"
-      }}>🔍</span>
-      {q && <button onClick={function () { setQ(""); }} style={{
-        position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-        background: "none", border: "none", color: "var(--dm)", cursor: "pointer", fontSize: 16
-      }}>✕</button>}
-    </div>
-
-    {mode === "players" && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14 }}>
-      <button onClick={function () { setLabelFilter(null) }} style={{
-        padding: "5px 10px", borderRadius: 6,
-        border: "1px solid " + (!labelFilter ? "var(--ac)" : "var(--b1)"),
-        background: !labelFilter ? "var(--ac2)" : "transparent",
-        color: !labelFilter ? "var(--ac)" : "var(--dm)",
-        fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue"
-      }}>All</button>
-      {LABELS.map(function (lb) {
-        var col = LABEL_COLORS[lb];
-        var active = labelFilter === lb;
-        return <button key={lb} onClick={function () { setLabelFilter(active ? null : lb) }} style={{
-          padding: "5px 10px", borderRadius: 6,
-          border: "1px solid " + (active ? col : "var(--b1)"),
-          background: active ? col + "22" : "transparent",
-          color: active ? col : "var(--dm)",
-          fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Epilogue"
-        }}>{lb}</button>;
-      })}
-    </div>}
-
-    {showPodium && <Podium top3={list.slice(0, 3)} sort={effSort} isCrew={mode === "crews"} />}
-
-    {(function () {
-      var afterPodium = list.slice(showPodium ? 3 : 0);
-      if (list.length === 0) {
-        var isSearching = q && q.trim();
-        return <div style={{
-          padding: 36, textAlign: "center",
-          border: "1px dashed var(--b1)", borderRadius: 10,
-          background: "var(--c2)"
-        }}>
-          <div style={{ fontSize: 13, color: "var(--dm)", marginBottom: 10 }}>
-            {isSearching ? ("No breakers or crews matching \"" + q + "\"")
-              : mode === "judges" ? "No judges recorded yet — set judge names on an event."
-              : "No data yet"}
-          </div>
-          {isSearching && <button onClick={function () { setQ(""); }} style={{
-            background: "transparent", border: "none", color: "var(--gd)",
-            fontFamily: "JetBrains Mono", fontSize: 12, fontWeight: 800,
-            letterSpacing: ".15em", textTransform: "uppercase",
-            textDecoration: "underline", textUnderlineOffset: 4, cursor: "pointer"
-          }}>Reset Search</button>}
-        </div>;
-      }
-      if (afterPodium.length === 0) return null;
-
-      // Build tier cards (5 dancers each)
-      var tiers = [];
-      var startRank = showPodium ? 4 : 1;
-      var i = 0, tIdx = 0;
-      while (i < afterPodium.length) {
-        var end = Math.min(i + 5, afterPodium.length);
-        tiers.push({
-          id: "rt" + tIdx,
-          title: "RANKS " + (startRank + i) + "–" + (startRank + end - 1),
-          items: afterPodium.slice(i, end),
-          startRank: startRank + i,
-          defaultOpen: tIdx === 0
-        });
-        i = end; tIdx++;
-      }
-
-      function renderRow(u, rank) {
-        var displayName = u.breakingName || u.name;
-        var meta = rowMetaText(u);
-        var spark = sparklineData(u);
-        var subInfo = (mode === "players" || mode === "kings") ? (u.city || u.country || ((u.crews || [])[0] || {}).name) : null;
-        var wins = winStreakCount(u);
-        var trend = (mode === "players" || mode === "kings") ? computeTrend(u) : null;
-        var showStats = (mode === "players" || mode === "kings") && u.eventsAttended > 0;
-        var canExpand = mode === "players" || mode === "kings" || mode === "crews";
-        var rowKey = u.id || displayName;
-        var isExpanded = expandedRowId === rowKey;
-        return <div style={{ borderBottom: "1px solid var(--b2)" }}>
-          <div onClick={canExpand ? function () { setExpandedRowId(isExpanded ? null : rowKey); } : undefined}
-            style={{
-              padding: "12px 16px", cursor: canExpand ? "pointer" : "default",
-              background: isExpanded ? "var(--c2)" : "transparent",
-              transition: "background .15s"
-            }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <RankBadge rank={rank} />
-              <Av name={displayName} sz={34} isCrew={mode === "crews"} />
-              <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-                <div style={{
-                  fontSize: 15, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)",
-                  display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"
-                }}>
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{highlightMatch(displayName, q)}</span>
-                  {trend && <TrendArrow trend={trend} />}
-                  <StreakPill wins={wins} />
-                  <KingPill count={u.cypherKings} />
-                </div>
-                {subInfo && <div style={{
-                  fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono",
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2
-                }}>{subInfo}</div>}
-                <div style={{ marginTop: 3 }}>
-                  {mode === "players" ? <PlacementChips placements={u.placements} /> :
-                    <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>{meta}</span>}
-                </div>
-              </div>
-              {spark && spark.length > 0 && <div style={{ opacity: 0.85, flexShrink: 0 }} title="Recent placement points">
-                <Sparkline values={spark} width={70} height={24} color={sortVal.col} />
-              </div>}
-              <div style={{
-                fontSize: 18, fontWeight: 800, fontFamily: "JetBrains Mono",
-                color: sortVal.col, minWidth: 54, textAlign: "right"
-              }}>{valueOf(u)}</div>
-              {canExpand && <span style={{
-                color: "var(--dm)", fontSize: 12, fontFamily: "JetBrains Mono",
-                transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform .15s"
-              }}>⌃</span>}
-            </div>
-            {showStats && <StatsTrio u={u} />}
-          </div>
-          {isExpanded && canExpand && <RowDrawer u={u} mode={mode} profiles={p.profiles} pR={fStats.pR} />}
-        </div>;
-      }
-
-      return tiers.map(function (tier) {
-        return <TierCard key={tier.id} title={tier.title} items={tier.items}
-          startRank={tier.startRank} defaultOpen={tier.defaultOpen}
-          isCrew={mode === "crews"} renderRow={renderRow} />;
-      });
-    })()}
-
-    {hasMore && <div style={{ marginTop: 10, textAlign: "center" }}>
-      <button onClick={function () { setVisibleCount(Math.min(visibleCount + 25, fullSorted.length)); }} style={{
-        padding: "10px 22px", border: "1px solid var(--b1)", background: "var(--c1)",
-        color: "var(--tx)", fontSize: 12, fontFamily: "JetBrains Mono", fontWeight: 700,
-        letterSpacing: ".1em", cursor: "pointer", textTransform: "uppercase", borderRadius: 8
-      }}>
-        Load {Math.min(25, fullSorted.length - effectiveCount)} more
-        <span style={{ marginLeft: 8, color: "var(--dm)", fontWeight: 400 }}>
-          ({effectiveCount}/{fullSorted.length})
-        </span>
-      </button>
-    </div>}
-
-    {list.length > 0 && <div style={{ marginTop: 14, textAlign: "center" }}>
-      <button onClick={function () {
-        if (typeof window === "undefined") return;
-        var sp = new URLSearchParams();
-        sp.set("embed", "help");
-        sp.set("mode", mode);
-        if (countryFilter !== "All") sp.set("country", countryFilter);
-        sp.set("sort", effSort);
-        if (winFilter && winFilter !== "all") sp.set("window", winFilter);
-        if (fmtFilter && fmtFilter !== "all") sp.set("format", fmtFilter);
-        if (q && q.trim()) sp.set("q", q.trim());
-        window.open("/?" + sp.toString(), "_blank");
-      }} style={{
-        padding: "8px 16px", borderRadius: 8,
-        background: "transparent", color: "var(--dm)",
-        border: "1px dashed var(--b1)",
-        fontSize: 12, fontFamily: "JetBrains Mono", letterSpacing: ".08em",
-        cursor: "pointer"
-      }} title="Open the embed builder with these filters pre-filled">
-        📺 EMBED THIS LEADERBOARD ON YOUR SITE
-      </button>
-    </div>}
-    </>}
-  </div>);
-}
 
 // ═══════════════════════════════════════════════════════════════
 // JUDGE PORTAL
@@ -5044,8 +7459,19 @@ function JudgePortal(p) {
           </div>
           {Array.from({ length: _rounds }).map(function (_, ri) {
             var rVal = getRoundScore(sc, slot, ri);
+            var marker = (ev.judgeMarkers && ev.judgeMarkers[slot] && ev.judgeMarkers[slot][pl.id] && ev.judgeMarkers[slot][pl.id][ri]) || null;
             return <div key={ri} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
               {_rounds > 1 && <div style={{ minWidth: 42, fontSize: 10, fontWeight: 700, fontFamily: "JetBrains Mono", color: "var(--dm)" }}>{"R" + (ri + 1)}</div>}
+              <JudgeMarker marker={marker} onCycle={function (next) {
+                p.onUpd(ev.id, function (d) {
+                  if (!d.judgeMarkers) d.judgeMarkers = {};
+                  if (!d.judgeMarkers[slot]) d.judgeMarkers[slot] = {};
+                  if (!d.judgeMarkers[slot][pl.id]) d.judgeMarkers[slot][pl.id] = {};
+                  if (next === null) delete d.judgeMarkers[slot][pl.id][ri];
+                  else d.judgeMarkers[slot][pl.id][ri] = next;
+                  return d;
+                });
+              }} />
               <HeatSlider value={rVal} onChange={function (val) {
                 p.onUpd(ev.id, function (d) { return setRoundScore(d, pl.id, slot, ri, val); });
               }} />
@@ -5082,19 +7508,29 @@ function JudgePortal(p) {
               {rIdx >= targetR ? "TB" + (rIdx - targetR + 1) : "R" + (rIdx + 1)}
             </div>
             <button onClick={function () { castBracketVote(lm.ri, lm.mi, rIdx, "red"); }} style={{
-              flex: 1, padding: "8px 6px", fontSize: 11, fontWeight: 800, fontFamily: "JetBrains Mono",
+              flex: 1, padding: "8px 6px", fontSize: 11, fontWeight: 800, fontFamily: "Epilogue",
               borderRadius: 6, cursor: "pointer",
               background: v === "red" ? "var(--rd)" : "transparent",
               color: v === "red" ? "#fff" : "var(--rd)",
-              border: "2px solid var(--rd)"
-            }}>RED</button>
+              border: "2px solid var(--rd)",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+            }} title={"Vote for " + m.p1.name + " (R)"}>
+              <span style={{ fontFamily: "JetBrains Mono", fontSize: 9, opacity: 0.7, border: "1px solid currentColor", borderRadius: 3, padding: "1px 4px" }}>R</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{m.p1.name}</span>
+            </button>
             <button onClick={function () { castBracketVote(lm.ri, lm.mi, rIdx, "blue"); }} style={{
-              flex: 1, padding: "8px 6px", fontSize: 11, fontWeight: 800, fontFamily: "JetBrains Mono",
+              flex: 1, padding: "8px 6px", fontSize: 11, fontWeight: 800, fontFamily: "Epilogue",
               borderRadius: 6, cursor: "pointer",
               background: v === "blue" ? "var(--bl)" : "transparent",
               color: v === "blue" ? "#fff" : "var(--bl)",
-              border: "2px solid var(--bl)"
-            }}>BLUE</button>
+              border: "2px solid var(--bl)",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+            }} title={"Vote for " + m.p2.name + " (B)"}>
+              <span style={{ fontFamily: "JetBrains Mono", fontSize: 9, opacity: 0.7, border: "1px solid currentColor", borderRadius: 3, padding: "1px 4px" }}>B</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{m.p2.name}</span>
+            </button>
           </div>;
         })}
       </Crd>;
@@ -5174,7 +7610,7 @@ function SignInModal(p) {
     pr.then(function (res) {
       setBusy(false);
       if (res && res.error) { setErr(res.error); return; }
-      if (res && res.needsConfirm) { setOk("Check your email for a confirmation link, then sign in."); setMode("signin"); return; }
+      if (res && res.needsConfirm) { setOk("Confirmation email sent. Open the link, then come back to sign in."); setMode("signin"); return; }
       if (mode === "reset") { setOk("Reset link sent — check your inbox."); return; }
       p.onClose && p.onClose();
     });
@@ -5182,7 +7618,9 @@ function SignInModal(p) {
   var title = mode === "signin" ? "Sign In" : mode === "signup" ? "Create Account" : "Reset Password";
   var sub = mode === "reset"
     ? "Enter your email and we'll send a password-reset link."
-    : (mode === "signin" ? "Sign in to watchlist events and claim your dancer profile." : "Sign up to watchlist events and claim your dancer profile.");
+    : (mode === "signin"
+      ? "Follow events, claim your profile, and submit clips."
+      : "Create an account to follow events, claim your profile, and submit clips.");
   return <div onClick={p.onClose} style={{
     position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", backdropFilter: "blur(6px)",
     zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16
@@ -5193,6 +7631,30 @@ function SignInModal(p) {
     }}>
       <h2 style={{ fontFamily: "Epilogue", fontSize: 22, color: "var(--tx)", marginBottom: 6 }}>{title}</h2>
       <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 16 }}>{sub}</div>
+      {needsPassword && mode !== "reset" && <div style={{ marginBottom: 14 }}>
+        <button onClick={function () {
+          setErr(""); setOk(""); setBusy(true);
+          auth.signInWithGoogle().then(function (res) {
+            setBusy(false);
+            if (res && res.error) setErr(res.error);
+            // On success Supabase redirects away; onAuthStateChange handles the rest on return.
+          });
+        }} disabled={busy} style={{
+          width: "100%", padding: "11px 14px", borderRadius: 8, cursor: busy ? "default" : "pointer",
+          background: "var(--c2)", border: "1px solid var(--b1)", color: "var(--tx)",
+          fontFamily: "Epilogue", fontSize: 14, fontWeight: 700,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          opacity: busy ? 0.5 : 1
+        }}>
+          <span style={{ fontSize: 16 }}>🔑</span>
+          Continue with Google
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0 4px" }}>
+          <div style={{ flex: 1, height: 1, background: "var(--b1)" }} />
+          <span style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", letterSpacing: ".12em" }}>OR</span>
+          <div style={{ flex: 1, height: 1, background: "var(--b1)" }} />
+        </div>
+      </div>}
       {mode === "signup" && <div style={{ marginBottom: 10 }}>
         <Lbl>Display Name</Lbl>
         <Inp value={name} onChange={setName} placeholder="What should we call you?" />
@@ -5215,7 +7677,9 @@ function SignInModal(p) {
         ⓘ Demo auth — Supabase env vars missing, so accounts are stored in this browser only.
       </div>}
       <Btn onClick={submit} disabled={busy || !email.trim() || (needsPassword && mode !== "reset" && !pw.trim())} sx={{ width: "100%" }}>
-        {busy ? "Working…" : (mode === "signin" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Reset Link")}
+        {busy
+          ? (mode === "signin" ? "Signing in…" : mode === "signup" ? "Creating account…" : "Sending link…")
+          : (mode === "signin" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Reset Link")}
       </Btn>
       <button onClick={function () {
         setMode(mode === "signup" ? "signin" : "signup"); setErr(""); setOk("");
@@ -5535,6 +7999,237 @@ function AudienceCrewDetail(p) {
   </div>;
 }
 
+// Verified-dancer clip submissions: lists current submissions + a small form
+// to propose a new YouTube clip for one of the events this dancer competed in.
+// Submissions land in clip_submissions (status='pending') and the admin
+// approves them via ClipInbox on the admin home.
+// Profile-removal request form — only mounted for verified dancer owners.
+// Submits to profile_removal_requests; admin reviews via RemovalInbox.
+function RemovalRequestSection(p) {
+  var me = p.me, pr = p.profile;
+  var _r = useState(null), existing = _r[0], setExisting = _r[1];
+  var _open = useState(false), open = _open[0], setOpen = _open[1];
+  var _reason = useState(""), reason = _reason[0], setReason = _reason[1];
+  var _err = useState(""), err = _err[0], setErr = _err[1];
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+  var _tick = useState(0), tick = _tick[0], setTick = _tick[1];
+
+  useEffect(function () {
+    if (!me) return;
+    Promise.resolve(removalRequests.listForUser(me.id)).then(function (all) {
+      var match = (all || []).find(function (r) { return r.profileId === pr.id; });
+      setExisting(match || null);
+    });
+  }, [me && me.id, pr.id, tick]);
+
+  function submit() {
+    setErr("");
+    if (!reason.trim()) { setErr("Please give a reason — admin needs context to decide."); return; }
+    setBusy(true);
+    Promise.resolve(removalRequests.add({
+      userId: me.id,
+      userEmail: me.email,
+      userDisplayName: me.displayName,
+      profileId: pr.id,
+      profileName: pr.breakingName || pr.fullName,
+      reason: reason.trim()
+    })).then(function (res) {
+      setBusy(false);
+      if (res && res.error) { setErr(res.error); return; }
+      setOpen(false); setReason("");
+      setTick(tick + 1);
+      if (typeof bbToast === "function") bbToast("Removal request submitted");
+    });
+  }
+
+  function withdraw() {
+    if (!existing) return;
+    Promise.resolve(removalRequests.remove(existing.id)).then(function () { setTick(tick + 1); });
+  }
+
+  // Show a tag-style summary when a request already exists.
+  if (existing) {
+    var statusColor = existing.status === "approved" ? "var(--rd)"
+                    : existing.status === "rejected" ? "var(--dm)" : "var(--gd)";
+    return <Crd sx={{ marginTop: 12, borderColor: statusColor, borderWidth: 1 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+        <Lbl>🗑 Removal Request</Lbl>
+        <Tag c={statusColor} bg="var(--c2)">{existing.status.toUpperCase()}</Tag>
+      </div>
+      {existing.reason && <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic", marginBottom: 6 }}>"{existing.reason}"</div>}
+      {existing.status === "approved" && <div style={{ fontSize: 12, color: "var(--rd)", fontWeight: 700 }}>
+        ✓ Approved. Your profile has been hidden from public views.
+      </div>}
+      {existing.status === "rejected" && <div style={{ fontSize: 12, color: "var(--dm)" }}>
+        Request was declined. Reach out to the organizer for context.
+        {existing.adminNotes && <div style={{ marginTop: 4, fontStyle: "italic" }}>Admin note: {existing.adminNotes}</div>}
+      </div>}
+      {existing.status === "pending" && <div>
+        <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 8 }}>
+          Awaiting admin review. You can withdraw while it's still pending.
+        </div>
+        <Btn v="gh" onClick={withdraw} sx={{ width: "100%", fontSize: 12 }}>Withdraw Request</Btn>
+      </div>}
+    </Crd>;
+  }
+
+  // Initial trigger — a quiet link-style row that expands into the form on click.
+  if (!open) {
+    return <div style={{ marginTop: 10, textAlign: "center" }}>
+      <button onClick={function () { setOpen(true); }} style={{
+        background: "transparent", border: "none", color: "var(--dm)",
+        fontSize: 11, fontFamily: "Epilogue", cursor: "pointer",
+        textDecoration: "underline", padding: 6, touchAction: "manipulation"
+      }}>Request my profile be removed</button>
+    </div>;
+  }
+
+  return <Crd sx={{ marginTop: 12, borderColor: "var(--rd)", borderWidth: 1 }}>
+    <Lbl>🗑 Request Profile Removal</Lbl>
+    <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10, lineHeight: 1.45 }}>
+      If approved, your profile is hidden from leaderboards, dancer lists, and embed widgets. Past event results stay archived in the admin database. <b>This is a one-way action</b> — to restore the profile later, contact the admin directly.
+    </div>
+    <Lbl>Reason</Lbl>
+    <TArea value={reason} onChange={function (v) { if (v.length <= 500) setReason(v); }}
+      placeholder="Tell the admin why — e.g. retired from the scene, moved away, name change, privacy reasons." rows={4} />
+    <div style={{ fontSize: 10, color: "var(--dm)", textAlign: "right", marginTop: 2 }}>{reason.length}/500</div>
+    {err && <div style={{ fontSize: 12, color: "var(--rd)", marginTop: 6 }}>{err}</div>}
+    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+      <Btn v="gh" onClick={function () { setOpen(false); setReason(""); setErr(""); }} sx={{ flex: 1, fontSize: 12 }}>Cancel</Btn>
+      <Btn v="dg" onClick={submit} disabled={busy || !reason.trim()} sx={{ flex: 2, fontSize: 12 }}>
+        {busy ? "Submitting…" : "Submit Removal Request"}
+      </Btn>
+    </div>
+  </Crd>;
+}
+
+function MyClipSubmissions(p) {
+  var me = p.me, pr = p.profile, events = p.events || [];
+  var _subs = useState([]), subs = _subs[0], setSubs = _subs[1];
+  var _tick = useState(0), tick = _tick[0], setTick = _tick[1];
+
+  // Events the dancer competed in (mapped with their player_id for the submission).
+  var myEvents = useMemo(function () {
+    return events
+      .map(function (ev) {
+        var pl = (ev.players || []).find(function (x) { return x.pid === pr.id; });
+        return pl ? { ev: ev, player: pl } : null;
+      })
+      .filter(Boolean);
+  }, [events, pr.id]);
+
+  var _ev = useState(myEvents[0] ? myEvents[0].ev.id : ""), evId = _ev[0], setEvId = _ev[1];
+  var _url = useState(""), url = _url[0], setUrl = _url[1];
+  var _msg = useState(""), msg = _msg[0], setMsg = _msg[1];
+  var _err = useState(""), err = _err[0], setErr = _err[1];
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+
+  useEffect(function () {
+    if (!me) return;
+    Promise.resolve(clipSubmissions.listForUser(me.id)).then(function (all) {
+      // Filter to this profile only (a user could in theory claim multiple profiles)
+      setSubs((all || []).filter(function (s) {
+        return myEvents.some(function (m) { return m.player.id === s.playerId; });
+      }));
+    });
+  }, [me && me.id, tick, myEvents.length]);
+
+  if (myEvents.length === 0) return null;
+
+  function submit() {
+    setErr("");
+    var clean = validateAndSanitizeYoutube(url);
+    if (!clean) { setErr("Enter a valid YouTube link."); return; }
+    var picked = myEvents.find(function (m) { return m.ev.id === evId; });
+    if (!picked) { setErr("Pick an event."); return; }
+    setBusy(true);
+    Promise.resolve(clipSubmissions.add({
+      userId: me.id,
+      userEmail: me.email,
+      userDisplayName: me.displayName,
+      eventId: picked.ev.id,
+      eventName: picked.ev.name,
+      playerId: picked.player.id,
+      breakerName: picked.player.name || pr.breakingName,
+      url: clean,
+      message: (msg || "").trim() || null
+    })).then(function (res) {
+      setBusy(false);
+      if (res && res.error) { setErr(res.error); return; }
+      setUrl(""); setMsg("");
+      setTick(tick + 1);
+      if (typeof bbToast === "function") bbToast("Submitted for review");
+    });
+  }
+
+  function withdraw(id) {
+    Promise.resolve(clipSubmissions.remove(id)).then(function () { setTick(tick + 1); });
+  }
+
+  return <Crd sx={{ marginTop: 14, borderColor: "var(--ac)", borderWidth: 1 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+      <Lbl>📺 Submit a Clip</Lbl>
+      <Tag c="var(--ac)" bg="var(--c2)">VERIFIED DANCER</Tag>
+    </div>
+    <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10, lineHeight: 1.45 }}>
+      Propose a YouTube highlight for one of your events. Goes to the admin for review.
+    </div>
+
+    <div style={{ marginBottom: 8 }}>
+      <Lbl>Event</Lbl>
+      <select value={evId} onChange={function (e) { setEvId(e.target.value); }}
+        style={{
+          width: "100%", padding: "9px 11px", fontSize: 14, background: "var(--inp)",
+          border: "1px solid var(--b1)", borderRadius: 8, color: "var(--tx)",
+          outline: "none", fontFamily: "Epilogue"
+        }}>
+        {myEvents.map(function (m) {
+          return <option key={m.ev.id} value={m.ev.id}>{m.ev.name}</option>;
+        })}
+      </select>
+    </div>
+
+    <div style={{ marginBottom: 8 }}>
+      <Lbl>YouTube URL</Lbl>
+      <Inp value={url} onChange={setUrl} placeholder="https://youtu.be/..." />
+    </div>
+
+    <div style={{ marginBottom: 8 }}>
+      <Lbl>Note (optional)</Lbl>
+      <TArea value={msg} onChange={function (v) { if (v.length <= 280) setMsg(v); }}
+        placeholder="Round, opponent, anything that helps the admin verify." rows={2} />
+      <div style={{ fontSize: 10, color: "var(--dm)", textAlign: "right", marginTop: 2 }}>{msg.length}/280</div>
+    </div>
+
+    {err && <div style={{ fontSize: 12, color: "var(--rd)", marginBottom: 8 }}>{err}</div>}
+    <Btn v="gn" onClick={submit} disabled={busy || !url || !evId} sx={{ width: "100%", fontSize: 13 }}>
+      {busy ? "Submitting…" : "Submit for Review"}
+    </Btn>
+
+    {subs.length > 0 && <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--b1)" }}>
+      <Lbl>Your Submissions</Lbl>
+      {subs.map(function (s) {
+        var statusColor = s.status === "approved" ? "var(--gn)" : s.status === "rejected" ? "var(--rd)" : "var(--gd)";
+        return <div key={s.id} style={{
+          background: "var(--c1)", border: "1px solid var(--b1)",
+          borderRadius: 8, padding: "9px 11px", marginBottom: 6
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <div style={{ fontSize: 12, fontFamily: "Epilogue", color: "var(--tx)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+              {s.eventName || "(event)"}
+            </div>
+            <Tag c={statusColor} bg="var(--c2)">{s.status.toUpperCase()}</Tag>
+          </div>
+          <a href={s.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "var(--ac)", fontFamily: "JetBrains Mono", wordBreak: "break-all", display: "block", marginBottom: 4 }}>
+            {s.url}
+          </a>
+          {s.status === "pending" && <Btn v="gh" onClick={function () { withdraw(s.id); }} sx={{ fontSize: 11, padding: "5px 10px" }}>Withdraw</Btn>}
+        </div>;
+      })}
+    </div>}
+  </Crd>;
+}
+
 function MyScoresPanel(p) {
   // Find events this dancer competed in. If scoresRevealed, show full per-judge breakdown.
   // If not, show just averages with a "Scores revealed after event ends" note.
@@ -5819,6 +8514,7 @@ function AudienceProfileDetail(p) {
       })()}
 
       {claim && claim.status === "approved" && <MyScoresPanel profile={pr} events={p.events} />}
+      {p.me && claim && claim.status === "approved" && <MyClipSubmissions me={p.me} profile={pr} events={p.events} />}
 
       <Crd sx={{ marginTop: 14, borderColor: "var(--ac)", borderWidth: 1 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -5860,6 +8556,11 @@ function AudienceProfileDetail(p) {
           Claim rejected. Contact the event organizer if you think this is a mistake.
         </div>}
       </Crd>
+
+      {/* Profile-removal request — only shown to verified owner of this profile.
+          Submission gates: claim.status === "approved" && claim.kind === "dancer". */}
+      {p.me && claim && claim.status === "approved" && (claim.kind || "dancer") === "dancer" &&
+        <RemovalRequestSection me={p.me} profile={pr} />}
     </div>
   </div>;
 }
@@ -5873,7 +8574,7 @@ function AudienceView(p) {
   var _showAuth = useState(false), showAuth = _showAuth[0], setShowAuth = _showAuth[1];
   var _selPid = useState(initialUrl.dancerId || null), selPid = _selPid[0], setSelPid = _selPid[1];
   var _selCid = useState(initialUrl.crewId || null), selCid = _selCid[0], setSelCid = _selCid[1];
-  var _sort = useState("dpr"), sortBy = _sort[0], setSortBy = _sort[1];
+  var _sort = useState("wins"), sortBy = _sort[0], setSortBy = _sort[1];
   var _lblFilter = useState(""), lblFilter = _lblFilter[0], setLblFilter = _lblFilter[1];
   var _watchlist = useState([]), watchlist = _watchlist[0], setWatchlist = _watchlist[1];
   var _myClaims = useState([]), myClaims = _myClaims[0], setMyClaims = _myClaims[1];
@@ -5988,6 +8689,7 @@ function AudienceView(p) {
   });
   var watchedEvents = activeAll.filter(function (e) { return isWatched(e.id); });
   var dancerList = (p.profiles || []).filter(function (pr) {
+    if (pr.archived) return false;
     if (lblFilter && !(pr.labels || []).includes(lblFilter)) return false;
     if (!qlc) return true;
     if ((pr.breakingName || "").toLowerCase().includes(qlc)) return true;
@@ -5997,19 +8699,21 @@ function AudienceView(p) {
     return false;
   });
   dancerList = dancerList.slice();
-  if (sortBy === "dpr") {
+  if (sortBy === "events") {
     dancerList.sort(function (a, b) {
       var sa = (stats.pR || []).find(function (x) { return x.id === a.id; });
       var sb2 = (stats.pR || []).find(function (x) { return x.id === b.id; });
-      return ((sb2 && sb2.dpr) || 0) - ((sa && sa.dpr) || 0);
+      return ((sb2 && sb2.eventsAttended) || 0) - ((sa && sa.eventsAttended) || 0);
     });
   } else if (sortBy === "name") {
     dancerList.sort(function (a, b) { return (a.breakingName || "").localeCompare(b.breakingName || ""); });
-  } else if (sortBy === "wins") {
+  } else { // default: wins
     dancerList.sort(function (a, b) {
       var sa = (stats.pR || []).find(function (x) { return x.id === a.id; });
       var sb2 = (stats.pR || []).find(function (x) { return x.id === b.id; });
-      return ((sb2 && sb2.wins) || 0) - ((sa && sa.wins) || 0);
+      var dw = ((sb2 && sb2.wins) || 0) - ((sa && sa.wins) || 0);
+      if (dw !== 0) return dw;
+      return ((sb2 && sb2.eventsAttended) || 0) - ((sa && sa.eventsAttended) || 0);
     });
   }
 
@@ -6027,6 +8731,22 @@ function AudienceView(p) {
         onSignIn={function () { setShowAuth(true); }} />
     </>;
   } else if (selProfile) {
+    // Archived profiles: only the verified owner can still see the detail (so they can
+    // view their removal request status). Everyone else gets a "no longer available" stub.
+    var ownsArchived = selProfile.archived && myClaim && myClaim.status === "approved" && (myClaim.kind || "dancer") === "dancer" && myClaim.profileId === selProfile.id;
+    if (selProfile.archived && !ownsArchived) {
+      return <>
+        {showAuth && <SignInModal onClose={function () { setShowAuth(false); }} />}
+        <div style={{ animation: "fu .3s ease", padding: 40, textAlign: "center" }}>
+          <Back onClick={function () { setSelPid(null); }} />
+          <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".15em", marginBottom: 8 }}>◆ PROFILE REMOVED</div>
+          <h2 style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 28, color: "var(--tx)", margin: "0 0 8px" }}>No longer available</h2>
+          <p style={{ fontSize: 13, color: "var(--dm)", maxWidth: 320, margin: "0 auto", lineHeight: 1.5 }}>
+            This dancer has requested their profile be removed from public view.
+          </p>
+        </div>
+      </>;
+    }
     return <>
       {showAuth && <SignInModal onClose={function () { setShowAuth(false); }} />}
       <AudienceProfileDetail profile={selProfile} events={p.events} stats={stats}
@@ -6180,9 +8900,9 @@ function AudienceView(p) {
         {tab === "dancers" && <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono" }}>SORT</span>
           {[
-            { id: "dpr", l: "DPR" },
-            { id: "name", l: "A–Z" },
-            { id: "wins", l: "Wins" }
+            { id: "wins", l: "Wins" },
+            { id: "events", l: "Events" },
+            { id: "name", l: "A–Z" }
           ].map(function (s) {
             return <button key={s.id} onClick={function () { setSortBy(s.id); }} style={{
               fontSize: 11, padding: "4px 10px", borderRadius: 6,
@@ -7413,13 +10133,36 @@ function SettingsView(p) {
     </Crd>
 
     <Crd sx={{ marginTop: 20 }}>
-      <Lbl>📺 Embed Leaderboard Widget</Lbl>
+      <Lbl>📺 Embed Widgets</Lbl>
       <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 10 }}>
-        Drop your rankings into any website as a live iframe. Configurable mode, country, theme, size.
+        Build a live iframe to drop on your blog, event page, or Squarespace site. Eight widget types — all auto-update via Supabase Realtime.
       </div>
-      <Btn v="jd" onClick={function () {
-        if (typeof window !== "undefined") window.open("/?embed=help", "_blank");
-      }} sx={{ width: "100%", fontSize: 13 }}>Open Embed Builder →</Btn>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=leaderboard", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>🏆 Leaderboard Builder →</Btn>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=live-event", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>● Live Event Builder →</Btn>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=dancer-profile", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>👤 Dancer Profile Builder →</Btn>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=crew", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>🎭 Crew Builder →</Btn>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=event-recap", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>📜 Event Recap Builder →</Btn>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=archive", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>🏆 Event Archive Builder →</Btn>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=ticker", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>📡 Live Ticker Builder →</Btn>
+        <Btn v="jd" onClick={function () {
+          if (typeof window !== "undefined") window.open("/?embed=help&kind=highlights", "_blank");
+        }} sx={{ width: "100%", fontSize: 13 }}>✨ Highlights Builder →</Btn>
+      </div>
     </Crd>
 
     <Crd sx={{ marginTop: 20 }}>
@@ -8234,6 +10977,452 @@ function EventAnalytics(p) {
   </div>;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// HIGHLIGHTS VIEW
+// ═══════════════════════════════════════════════════════════════
+// Analytics digest with time filter (All / Year / Month). Not a rank — a set of
+// "what's been happening" cards. Each card is independently filtered.
+
+var HL_TIME_OPTIONS = [
+  { id: "all", label: "All Time" },
+  { id: "year", label: "This Year" },
+  { id: "month", label: "This Month" }
+];
+
+function RankingsView(p) {
+  var _w = useState("all"), win = _w[0], setWin = _w[1];
+
+  var events = useMemo(function () {
+    return (p.events || []).filter(function (e) { return eventInWindow(e, win); });
+  }, [p.events, win]);
+
+  // Helper: champion (final winner) of an event
+  function champOf(ev) {
+    var bk = ev.bracket;
+    return bk && bk[bk.length - 1] && bk[bk.length - 1][0] && bk[bk.length - 1][0].winner || null;
+  }
+  function profileOf(pid) { return (p.profiles || []).find(function (x) { return x.id === pid; }) || null; }
+  function crewOf(cid) { return (p.crews || []).find(function (x) { return x.id === cid; }) || null; }
+
+  // ── Build all card datasets ──
+  // 1. Recent wins (events with champions, newest first)
+  var recentWins = useMemo(function () {
+    return events
+      .map(function (ev) {
+        var c = champOf(ev);
+        if (!c) return null;
+        var pr = c.pid ? profileOf(c.pid) : null;
+        var cr = (pr && pr.primaryCrew) ? crewOf(pr.primaryCrew) : null;
+        return { ev: ev, dancer: c.name, crew: cr ? cr.name : (c.crew || ""), pid: c.pid };
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return new Date(b.ev.dt || 0) - new Date(a.ev.dt || 0); })
+      .slice(0, 8);
+  }, [events]);
+
+  // 2. Recent Cypher Kings / Queens
+  var recentKings = useMemo(function () {
+    return events
+      .filter(function (ev) { return ev.cypherKingPid; })
+      .map(function (ev) {
+        var pr = profileOf(ev.cypherKingPid);
+        return pr ? { ev: ev, dancer: pr.breakingName || pr.fullName, profile: pr } : null;
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return new Date(b.ev.dt || 0) - new Date(a.ev.dt || 0); })
+      .slice(0, 8);
+  }, [events]);
+
+  // 3. Recent Youth wins (champion has "Youth" label)
+  var recentYouthWins = useMemo(function () {
+    return recentWins.filter(function (r) {
+      var pr = r.pid ? profileOf(r.pid) : null;
+      return pr && (pr.labels || []).indexOf("Youth") >= 0;
+    });
+  }, [recentWins]);
+
+  // 4. Recent BGirl wins
+  var recentBGirlWins = useMemo(function () {
+    return recentWins.filter(function (r) {
+      var pr = r.pid ? profileOf(r.pid) : null;
+      return pr && (pr.labels || []).indexOf("BGirl") >= 0;
+    });
+  }, [recentWins]);
+
+  // 5. Most events — dancers
+  var topDancersByEvents = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        counts[pl.pid] = (counts[pl.pid] || 0) + 1;
+      });
+    });
+    return Object.keys(counts)
+      .map(function (pid) {
+        var pr = profileOf(pid);
+        return pr ? { pid: pid, name: pr.breakingName || pr.fullName, count: counts[pid] } : null;
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 5);
+  }, [events]);
+
+  // 6. Most events — crews
+  var topCrewsByEvents = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.crewId || seen[pl.crewId]) return;
+        seen[pl.crewId] = true;
+        counts[pl.crewId] = (counts[pl.crewId] || 0) + 1;
+      });
+    });
+    return Object.keys(counts)
+      .map(function (cid) {
+        var cr = crewOf(cid);
+        return cr ? { cid: cid, name: cr.name, count: counts[cid] } : null;
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 5);
+  }, [events]);
+
+  // 7. Local vs non-local (dancers)
+  var localBreakdown = useMemo(function () {
+    var stats = {};
+    events.forEach(function (ev) {
+      var local = isLocalEvent(ev);
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        if (!stats[pl.pid]) stats[pl.pid] = { local: 0, away: 0 };
+        if (local) stats[pl.pid].local++; else stats[pl.pid].away++;
+      });
+    });
+    return Object.keys(stats)
+      .map(function (pid) {
+        var pr = profileOf(pid);
+        if (!pr) return null;
+        return Object.assign({ pid: pid, name: pr.breakingName || pr.fullName }, stats[pid]);
+      })
+      .filter(Boolean)
+      .filter(function (r) { return r.local + r.away >= 2; })
+      .sort(function (a, b) { return (b.local + b.away) - (a.local + a.away); })
+      .slice(0, 6);
+  }, [events]);
+
+  // 8. Top 3 judges
+  var topJudges = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      if (!ev.jn) return;
+      for (var i = 0; i < (ev.nj || 0); i++) {
+        var name = (ev.jn[i] || "").trim();
+        if (!name) continue;
+        counts[name] = (counts[name] || 0) + 1;
+      }
+    });
+    return Object.keys(counts)
+      .map(function (n) { return { name: n, count: counts[n] }; })
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 3);
+  }, [events]);
+
+  // 9. Round of the Night leaders
+  var rotnLeaders = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      (ev.roundsOfTheNight || []).forEach(function (r) {
+        var key = r.playerPid || r.playerId;
+        if (!key) return;
+        if (!counts[key]) counts[key] = { name: r.playerName, count: 0, pid: r.playerPid };
+        counts[key].count++;
+      });
+    });
+    return Object.keys(counts)
+      .map(function (k) { return counts[k]; })
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 5);
+  }, [events]);
+
+  // 10. Top cities
+  var topCities = useMemo(function () {
+    var counts = {};
+    events.forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        var pr = profileOf(pl.pid);
+        if (!pr || !pr.city) return;
+        var key = pr.city + (pr.country ? ", " + pr.country : "");
+        if (!counts[key]) counts[key] = { name: key, count: 0 };
+        counts[key].count++;
+      });
+    });
+    return Object.keys(counts)
+      .map(function (k) { return counts[k]; })
+      .sort(function (a, b) { return b.count - a.count; })
+      .slice(0, 6);
+  }, [events]);
+
+  // 11. Newcomers — dancers whose total event participation across ALL time is 1
+  //     AND whose only event is in the current filter window.
+  var newcomers = useMemo(function () {
+    var totalCounts = {};
+    (p.events || []).forEach(function (ev) {
+      var seen = {};
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid || seen[pl.pid]) return;
+        seen[pl.pid] = true;
+        totalCounts[pl.pid] = (totalCounts[pl.pid] || 0) + 1;
+      });
+    });
+    var firstEventByPid = {};
+    events.forEach(function (ev) {
+      (ev.players || []).forEach(function (pl) {
+        if (!pl.pid) return;
+        if (totalCounts[pl.pid] !== 1) return;
+        if (!firstEventByPid[pl.pid]) firstEventByPid[pl.pid] = ev;
+      });
+    });
+    return Object.keys(firstEventByPid)
+      .map(function (pid) {
+        var pr = profileOf(pid);
+        if (!pr) return null;
+        return { pid: pid, name: pr.breakingName || pr.fullName, ev: firstEventByPid[pid] };
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return new Date(b.ev.dt || 0) - new Date(a.ev.dt || 0); })
+      .slice(0, 8);
+  }, [events, p.events]);
+
+  // ── Render ──
+  function HCard(props) {
+    return <div style={{
+      background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 12,
+      padding: 14, minHeight: 200
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 16 }}>{props.icon}</span>
+        <div style={{ fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--ac)", letterSpacing: ".14em", fontWeight: 800, textTransform: "uppercase" }}>
+          {props.title}
+        </div>
+      </div>
+      {props.children}
+    </div>;
+  }
+
+  function Empty() {
+    return <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic", textAlign: "center", padding: "20px 0" }}>
+      No data in this window.
+    </div>;
+  }
+
+  function row(left, right, idx) {
+    return <div key={idx} style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "7px 0", borderBottom: idx < 99 ? "1px solid var(--b1)" : "none",
+      fontSize: 13, fontFamily: "Epilogue"
+    }}>
+      <span style={{ color: "var(--tx)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{left}</span>
+      <span style={{ color: "var(--dm)", fontFamily: "JetBrains Mono", fontWeight: 700, fontSize: 12, marginLeft: 8 }}>{right}</span>
+    </div>;
+  }
+
+  return <div style={{ animation: "fu .3s ease" }}>
+    <Back onClick={p.onBack} />
+    <h1 style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 30, color: "var(--tx)", marginBottom: 4 }}>Rankings &amp; Highlights</h1>
+    <p style={{ fontSize: 13, color: "var(--dm)", marginBottom: 16 }}>
+      Recognition across the scene — wins, participation, newcomers, round-of-the-night. Filtered by time window.
+    </p>
+
+    {/* Time filter */}
+    <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+      {HL_TIME_OPTIONS.map(function (o) {
+        var active = win === o.id;
+        return <button key={o.id} onClick={function () { setWin(o.id); }} style={{
+          padding: "8px 14px",
+          background: active ? "var(--ac)" : "transparent",
+          color: active ? "#fff" : "var(--dm)",
+          border: "1px solid " + (active ? "var(--ac)" : "var(--b1)"),
+          fontSize: 11, fontFamily: "JetBrains Mono", fontWeight: 800,
+          letterSpacing: ".1em", textTransform: "uppercase",
+          borderRadius: 8, cursor: "pointer", touchAction: "manipulation"
+        }}>{o.label}</button>;
+      })}
+      <div style={{ marginLeft: "auto", fontSize: 11, fontFamily: "JetBrains Mono", color: "var(--dm)", alignSelf: "center" }}>
+        {events.length} EVENT{events.length === 1 ? "" : "S"}
+      </div>
+    </div>
+
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+      <HCard icon="🏆" title="Recent Wins">
+        {recentWins.length === 0 ? <Empty /> : recentWins.map(function (r, i) {
+          return row(<span><b>{r.dancer}</b>{r.crew && <span style={{ color: "var(--cr)" }}> · {r.crew}</span>}</span>, r.ev.name, i);
+        })}
+      </HCard>
+
+      <HCard icon="👑" title="Recent Cypher Kings / Queens">
+        {recentKings.length === 0 ? <Empty /> : recentKings.map(function (r, i) {
+          return row(<b>{r.dancer}</b>, r.ev.name, i);
+        })}
+      </HCard>
+
+      <HCard icon="🧒" title="Recent Youth Wins">
+        {recentYouthWins.length === 0 ? <Empty /> : recentYouthWins.map(function (r, i) {
+          return row(<b>{r.dancer}</b>, r.ev.name, i);
+        })}
+      </HCard>
+
+      <HCard icon="💃" title="Recent BGirl Wins">
+        {recentBGirlWins.length === 0 ? <Empty /> : recentBGirlWins.map(function (r, i) {
+          return row(<b>{r.dancer}</b>, r.ev.name, i);
+        })}
+      </HCard>
+
+      <HCard icon="🌱" title="Newcomers (1st Battle)">
+        {newcomers.length === 0 ? <Empty /> : newcomers.map(function (r, i) {
+          return row(<b>{r.name}</b>, r.ev.name, i);
+        })}
+      </HCard>
+
+      <HCard icon="🌟" title="Round of the Night Leaders">
+        {rotnLeaders.length === 0 ? <Empty /> : rotnLeaders.map(function (r, i) {
+          return row(<b>{r.name}</b>, r.count + "×", i);
+        })}
+      </HCard>
+
+      <HCard icon="📅" title="Most Events — Dancers">
+        {topDancersByEvents.length === 0 ? <Empty /> : topDancersByEvents.map(function (r, i) {
+          return row(<b>{r.name}</b>, r.count + " events", i);
+        })}
+      </HCard>
+
+      <HCard icon="🎭" title="Most Events — Crews">
+        {topCrewsByEvents.length === 0 ? <Empty /> : topCrewsByEvents.map(function (r, i) {
+          return row(<b>{r.name}</b>, r.count + " events", i);
+        })}
+      </HCard>
+
+      <HCard icon="🏠" title="Local vs Non-Local (Dancers)">
+        <div style={{ fontSize: 10, color: "var(--dm)", marginBottom: 6, fontFamily: "JetBrains Mono" }}>
+          GREATER VANCOUVER VS AWAY
+        </div>
+        {localBreakdown.length === 0 ? <Empty /> : localBreakdown.map(function (r, i) {
+          return row(<b>{r.name}</b>, r.local + " local · " + r.away + " away", i);
+        })}
+      </HCard>
+
+      <HCard icon="⚖️" title="Top Judges (Top 3)">
+        {topJudges.length === 0 ? <Empty /> : topJudges.map(function (r, i) {
+          return row(<b>{r.name}</b>, r.count + " events", i);
+        })}
+      </HCard>
+
+      <HCard icon="🗺" title="Top Cities">
+        {topCities.length === 0 ? <Empty /> : topCities.map(function (r, i) {
+          return row(<b>{r.name}</b>, r.count + " dancers", i);
+        })}
+      </HCard>
+    </div>
+  </div>;
+}
+
+// 🌟 Round of the Night — admin awards standout rounds to dancers. Multiple per event.
+// Persisted as event.roundsOfTheNight = [{ id, playerId, label }]. Read by HighlightsView.
+function RoundOfTheNightSection(p) {
+  var ev = p.ev;
+  var rotn = ev.roundsOfTheNight || [];
+  var _sel = useState(""), selPid = _sel[0], setSelPid = _sel[1];
+  var _lbl = useState(""), lbl = _lbl[0], setLbl = _lbl[1];
+
+  function addEntry() {
+    if (!selPid) return;
+    var player = (ev.players || []).find(function (pl) { return pl.id === selPid; });
+    if (!player) return;
+    p.upd(ev.id, function (d) {
+      var arr = (d.roundsOfTheNight || []).slice();
+      arr.push({
+        id: "rotn_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+        playerId: selPid,
+        playerName: player.name,
+        playerPid: player.pid,
+        label: (lbl || "").trim() || null,
+        addedAt: new Date().toISOString()
+      });
+      d.roundsOfTheNight = arr;
+      return d;
+    });
+    setSelPid(""); setLbl("");
+  }
+
+  function removeEntry(id) {
+    p.upd(ev.id, function (d) {
+      d.roundsOfTheNight = (d.roundsOfTheNight || []).filter(function (r) { return r.id !== id; });
+      return d;
+    });
+  }
+
+  return <Crd sx={{ marginTop: 16, borderColor: "var(--gd)", borderWidth: 1 }}>
+    <div style={{ fontSize: 11, color: "var(--gd)", fontWeight: 800, fontFamily: "JetBrains Mono", letterSpacing: ".12em", marginBottom: 8 }}>
+      🌟 ROUND OF THE NIGHT
+    </div>
+    <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 10, lineHeight: 1.4 }}>
+      Award standout rounds. Multiple per event allowed — tracked across all events on the Highlights view.
+    </div>
+
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "end" }}>
+      <div>
+        <Lbl>Breaker</Lbl>
+        <select value={selPid} onChange={function (e) { setSelPid(e.target.value); }}
+          style={{
+            width: "100%", padding: 9, borderRadius: 7, background: "var(--c1)",
+            color: "var(--tx)", border: "1px solid var(--b1)", fontSize: 13, fontFamily: "Epilogue"
+          }}>
+          <option value="">— Pick a breaker —</option>
+          {(ev.players || []).map(function (pl) {
+            return <option key={pl.id} value={pl.id}>{pl.name}</option>;
+          })}
+        </select>
+      </div>
+      <div>
+        <Lbl>Label (optional)</Lbl>
+        <Inp value={lbl} onChange={setLbl} placeholder="e.g. Round 3 vs Faucet" />
+      </div>
+      <Btn v="gd" onClick={addEntry} disabled={!selPid} sx={{ fontSize: 12, padding: "10px 14px" }}>+ Award</Btn>
+    </div>
+
+    {rotn.length > 0 && <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--b1)" }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "var(--dm)", letterSpacing: ".12em", marginBottom: 6 }}>
+        {rotn.length} ENTR{rotn.length === 1 ? "Y" : "IES"}
+      </div>
+      {rotn.map(function (r) {
+        return <div key={r.id} style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+          background: "var(--gd2)", border: "1px solid var(--gd)", borderRadius: 8,
+          marginBottom: 5
+        }}>
+          <span style={{ fontSize: 14 }}>🌟</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>{r.playerName}</div>
+            {r.label && <div style={{ fontSize: 11, color: "var(--dm)", fontStyle: "italic" }}>{r.label}</div>}
+          </div>
+          <button onClick={function () { removeEntry(r.id); }} style={{
+            background: "transparent", border: "none", color: "var(--rd)",
+            cursor: "pointer", fontSize: 16, padding: "4px 8px", lineHeight: 1
+          }}>✕</button>
+        </div>;
+      })}
+    </div>}
+  </Crd>;
+}
+
 function EventDetailView(p) {
   var ev = p.ev;
   var upd = p.upd;
@@ -8296,6 +11485,23 @@ function EventDetailView(p) {
         b3[ri + 1][nm2][mi % 2 === 0 ? "p1" : "p2"] = winner;
       }
       d.bracket = b3;
+      // Stamp when the final match resolves so the live widget knows the 24h grace window start.
+      // Cleared if the final winner is later unset (re-pick).
+      var isFinal = ri === b3.length - 1 && mi === 0;
+      if (isFinal) d.championDeclaredAt = winner ? new Date().toISOString() : null;
+      // Bronze match: if this match was a semifinal and a 3rd-place match is enabled,
+      // route the loser into the bronze slot.
+      if (d.thirdPlaceMatch && b3.length >= 2 && ri === b3.length - 2) {
+        var sm = b3[ri][mi];
+        var loser = (winner && sm.p1 && sm.p1.id === winner.id) ? sm.p2
+                  : (winner && sm.p2 && sm.p2.id === winner.id) ? sm.p1 : null;
+        var tp = Object.assign({}, d.thirdPlaceMatch);
+        tp[mi === 0 ? "p1" : "p2"] = loser;
+        // Clear stale bronze winner if either slot just changed.
+        tp.winner = null;
+        tp.rounds = [];
+        d.thirdPlaceMatch = tp;
+      }
       return d;
     });
   }
@@ -8443,6 +11649,7 @@ function EventDetailView(p) {
               return d;
             });
           }} />
+        <BulkAddBreakers ev={ev} profiles={p.profiles} upd={upd} />
       </div>}
       {ev.players.map(function (pl, i) {
         if (ev.checkInMode) {
@@ -8646,8 +11853,12 @@ function EventDetailView(p) {
     {tab === "seeding" && <SeedingTab ev={ev} ranked={ranked} upd={upd}
       onGenerate={function (seeds) {
         upd(ev.id, function (d) {
+          var live = seeds.filter(Boolean);
           d.manualSeeds = seeds.map(function (pl) { return pl ? pl.id : null });
-          d.bracket = mkB(seeds.filter(Boolean), ev.bracketSize);
+          d.bracket = mkB(live, ev.bracketSize);
+          // Sync bracketSize if auto-downgrade kicked in (so UI labels match the actual tree).
+          d.bracketSize = effectiveBracketSize(ev.bracketSize, live.length);
+          d.thirdPlaceMatch = ev.includeThirdPlace ? mkThirdPlace() : null;
           return d;
         });
         setTab("bracket");
@@ -8713,6 +11924,8 @@ function EventDetailView(p) {
             var seed = (d.manualSeeds || []).map(function (pid) { return ranked.find(function (r) { return r.id === pid }) }).filter(Boolean);
             if (seed.length === 0) seed = ranked.slice(0, ev.bracketSize);
             d.bracket = mkB(seed, ev.bracketSize);
+            d.bracketSize = effectiveBracketSize(ev.bracketSize, seed.length);
+            d.thirdPlaceMatch = ev.includeThirdPlace ? mkThirdPlace() : null;
             return d;
           });
           setSelMatch(null);
@@ -8721,11 +11934,49 @@ function EventDetailView(p) {
           upd(ev.id, function (d) { d.bracket = null; return d; });
           setSelMatch(null);
         }} sx={{ fontSize: 11 }}>Clear</Btn>
+        <Btn v="gd" onClick={function () { exportBracketImage(ev); }} sx={{ fontSize: 11 }}>📸 Export Image</Btn>
       </div>
       {selMatch && ev.bracket[selMatch.ri] && ev.bracket[selMatch.ri][selMatch.mi] &&
         <MatchScorer ev={ev} upd={upd} ri={selMatch.ri} mi={selMatch.mi}
           onClose={function () { setSelMatch(null); }}
           onWinner={function (winner) { pickWinner(selMatch.ri, selMatch.mi, winner); }} />}
+
+      {ev.thirdPlaceMatch && (function () {
+        var tp = ev.thirdPlaceMatch;
+        var pickBronze = function (winner) {
+          upd(ev.id, function (d) {
+            d.thirdPlaceMatch = Object.assign({}, d.thirdPlaceMatch, { winner: winner });
+            return d;
+          });
+        };
+        return <Crd sx={{ marginTop: 16, borderColor: "var(--ac)", borderWidth: 1 }}>
+          <div style={{ fontSize: 11, color: "var(--ac)", fontWeight: 800, fontFamily: "JetBrains Mono", letterSpacing: ".12em", marginBottom: 8 }}>🥉 3RD-PLACE MATCH</div>
+          <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 10 }}>
+            {tp.p1 && tp.p2 ? "Pick the bronze winner." : "Auto-populates once both semifinals are decided."}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 10, alignItems: "center" }}>
+            <Btn v={tp.winner && tp.p1 && tp.winner.id === tp.p1.id ? "gd" : "gh"}
+              disabled={!tp.p1 || !tp.p2}
+              onClick={function () { if (tp.p1) pickBronze(tp.p1); }}
+              sx={{ fontSize: 13, padding: "10px 12px", textAlign: "left" }}>
+              {tp.p1 ? tp.p1.name : "— Semi loser A —"}
+            </Btn>
+            <span style={{ fontSize: 11, color: "var(--dm)", fontFamily: "JetBrains Mono", fontWeight: 800 }}>VS</span>
+            <Btn v={tp.winner && tp.p2 && tp.winner.id === tp.p2.id ? "gd" : "gh"}
+              disabled={!tp.p1 || !tp.p2}
+              onClick={function () { if (tp.p2) pickBronze(tp.p2); }}
+              sx={{ fontSize: 13, padding: "10px 12px", textAlign: "left" }}>
+              {tp.p2 ? tp.p2.name : "— Semi loser B —"}
+            </Btn>
+          </div>
+          {tp.winner && <div style={{ marginTop: 10, fontSize: 12, color: "var(--gd)", fontFamily: "Epilogue", fontWeight: 700 }}>
+            🥉 Bronze: {tp.winner.name}
+          </div>}
+        </Crd>;
+      })()}
+
+      {/* Round of the Night — multiple entries per event, listed for the highlights view */}
+      <RoundOfTheNightSection ev={ev} upd={upd} />
     </div>}
 
     <Crd sx={{ marginTop: 18, border: "1px solid " + (ev.scoresRevealed ? "var(--gn)" : "var(--b1)") }}>
@@ -8982,16 +12233,53 @@ function SeedingTab(p) {
       </div>
     </div>
 
+    {(function () {
+      // Effective bracket size after the <12 → Top 8 auto-downgrade rule.
+      var effBs = effectiveBracketSize(bs, filledCount);
+      if (effBs === bs || filledCount === 0) return null;
+      return <Crd sx={{ borderColor: "var(--ac)", borderWidth: 1, background: "var(--c2)" }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "var(--ac)", fontFamily: "JetBrains Mono", letterSpacing: ".1em", marginBottom: 6 }}>◆ AUTO-DOWNGRADE</div>
+        <div style={{ fontSize: 13, color: "var(--tx)", lineHeight: 1.45 }}>
+          Only <b>{filledCount}</b> breakers checked in (under 12). Bracket will generate as a <b>Top {effBs}</b> using the top {effBs} seeds — the rest sit out this round.
+        </div>
+      </Crd>;
+    })()}
+
+    <Crd>
+      <Lbl>Bracket Options</Lbl>
+      <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+        background: "var(--c1)", border: "1px solid var(--b1)", borderRadius: 10, cursor: "pointer", userSelect: "none" }}>
+        <input type="checkbox" checked={!!ev.includeThirdPlace}
+          onChange={function (e) {
+            var on = e.target.checked;
+            p.upd(ev.id, function (d) {
+              d.includeThirdPlace = on;
+              if (on && d.bracket && d.bracket.length >= 2 && !d.thirdPlaceMatch) d.thirdPlaceMatch = mkThirdPlace();
+              if (!on) d.thirdPlaceMatch = null;
+              return d;
+            });
+          }}
+          style={{ width: 18, height: 18, accentColor: "var(--ac)" }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "Epilogue", color: "var(--tx)" }}>🥉 Include 3rd-Place Match</div>
+          <div style={{ fontSize: 11, color: "var(--dm)" }}>Semifinal losers battle for bronze. Off by default.</div>
+        </div>
+      </label>
+    </Crd>
+
     {filledCount >= 2 && <Crd sx={{ marginTop: 14 }}>
       <Lbl>First Round Pairings</Lbl>
       <div style={{ fontSize: 11, color: "var(--dm)", marginBottom: 8 }}>
-        Preview of round 1 matches. Adjacent seeds play each other.
+        Top seed vs bottom seed — protects #1 and #2 until the Final.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 8 }}>
         {(function () {
           var rows = [];
-          for (var i = 0; i < bs; i += 2) {
-            var a = seeds[i], b = seeds[i + 1];
+          var effBs = effectiveBracketSize(bs, filledCount);
+          var order = SEED_ORDERS[effBs] || (function () { var arr = []; for (var k = 1; k <= effBs; k++) arr.push(k); return arr; })();
+          for (var i = 0; i < effBs; i += 2) {
+            var seedA = order[i], seedB = order[i + 1];
+            var a = seeds[seedA - 1], b = seeds[seedB - 1];
             var n = i / 2 + 1;
             var both = a && b;
             rows.push(<div key={i} style={{
@@ -9001,12 +12289,12 @@ function SeedingTab(p) {
             }}>
               <div style={{ fontSize: 10, color: "var(--dm)", fontFamily: "JetBrains Mono", marginBottom: 4 }}>{"MATCH " + n}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: "Epilogue" }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--ac)", fontFamily: "JetBrains Mono", minWidth: 24 }}>{"#" + (i + 1)}</span>
+                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--ac)", fontFamily: "JetBrains Mono", minWidth: 24 }}>{"#" + seedA}</span>
                 <span style={{ color: a ? "var(--tx)" : "var(--dm)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a ? a.name : "— TBD —"}</span>
               </div>
               <div style={{ fontSize: 10, color: "var(--dm)", margin: "2px 0 2px 30px" }}>vs</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: "Epilogue" }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--ac)", fontFamily: "JetBrains Mono", minWidth: 24 }}>{"#" + (i + 2)}</span>
+                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--ac)", fontFamily: "JetBrains Mono", minWidth: 24 }}>{"#" + seedB}</span>
                 <span style={{ color: b ? "var(--tx)" : "var(--dm)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b ? b.name : "— TBD —"}</span>
               </div>
             </div>);
@@ -9121,6 +12409,134 @@ function ClaimsInbox(p) {
   </Crd>;
 }
 
+// Admin moderation queue for clip_submissions. Models ClaimsInbox.
+// On Approve: writes the YouTube URL to event.players[i].clip + updates row status.
+// On Reject: just updates row status.
+// Admin inbox for profile_removal_requests. On Approve: marks
+// profile.archived = true in user_data so audience views hide it.
+function RemovalInbox(p) {
+  var _r = useState([]), reqs = _r[0], setReqs = _r[1];
+  var _tick = useState(0), tick = _tick[0], setTick = _tick[1];
+
+  useEffect(function () {
+    Promise.resolve(removalRequests.list()).then(function (all) { setReqs(all || []); });
+  }, [tick]);
+
+  var pending = reqs.filter(function (r) { return r.status === "pending"; });
+  if (pending.length === 0) return null;
+
+  function decide(r, status) {
+    if (status === "approved") {
+      p.setProfiles(function (prev) {
+        return prev.map(function (pr) {
+          if (pr.id !== r.profileId) return pr;
+          return Object.assign({}, pr, { archived: true, archivedAt: new Date().toISOString(), archivedReason: r.reason });
+        });
+      });
+    }
+    var me = auth.getUser();
+    Promise.resolve(removalRequests.update(r.id, {
+      status: status, decidedAt: new Date().toISOString(), decidedBy: me ? me.id : null
+    })).then(function () { setTick(tick + 1); });
+    if (typeof bbToast === "function") bbToast(status === "approved" ? "Profile archived" : "Request declined");
+  }
+
+  return <Crd sx={{ marginBottom: 12, borderColor: "var(--rd)", borderWidth: 1, background: "var(--rd2)" }}>
+    <Lbl>🗑 Removal Requests ({pending.length})</Lbl>
+    {pending.map(function (r) {
+      return <div key={r.id} style={{
+        background: "var(--c1)", borderRadius: 8, padding: "10px 12px",
+        border: "1px solid var(--b1)", marginBottom: 6
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <Tag c="var(--rd)" bg="var(--rd2)">REMOVE</Tag>
+          <div style={{ fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)", fontWeight: 700 }}>
+            {r.userEmail}
+          </div>
+          <span style={{ fontSize: 11, color: "var(--dm)" }}>→ {r.profileName || "(profile)"}</span>
+        </div>
+        {r.reason && <div style={{ fontSize: 12, color: "var(--dm)", fontStyle: "italic", marginBottom: 6,
+          background: "var(--c2)", padding: 8, borderRadius: 6 }}>"{r.reason}"</div>}
+        <div style={{ display: "flex", gap: 6 }}>
+          <Btn v="dg" onClick={function () { decide(r, "approved"); }} sx={{ flex: 1, fontSize: 11 }}>Approve &amp; archive</Btn>
+          <Btn v="gh" onClick={function () { decide(r, "rejected"); }} sx={{ flex: 1, fontSize: 11 }}>Decline</Btn>
+        </div>
+      </div>;
+    })}
+  </Crd>;
+}
+
+function ClipInbox(p) {
+  var _subs = useState([]), subs = _subs[0], setSubs = _subs[1];
+  var _tick = useState(0), tick = _tick[0], setTick = _tick[1];
+
+  useEffect(function () {
+    Promise.resolve(clipSubmissions.list()).then(function (all) { setSubs(all || []); });
+  }, [tick]);
+
+  var pending = subs.filter(function (s) { return s.status === "pending"; });
+  if (pending.length === 0) return null;
+
+  function approve(sub) {
+    // 1. Patch the local event state so the clip propagates instantly.
+    p.setEvents(function (prev) {
+      return prev.map(function (e) {
+        if (e.id !== sub.eventId) return e;
+        var players = (e.players || []).map(function (pl) {
+          if (pl.id !== sub.playerId) return pl;
+          return Object.assign({}, pl, { clip: sub.url });
+        });
+        return Object.assign({}, e, { players: players });
+      });
+    });
+    // 2. Mark the submission row approved.
+    var me = auth.getUser();
+    Promise.resolve(clipSubmissions.update(sub.id, {
+      status: "approved",
+      decidedAt: new Date().toISOString(),
+      decidedBy: me ? me.id : null
+    })).then(function () { setTick(tick + 1); });
+    if (typeof bbToast === "function") bbToast("Clip approved · live on the dancer's profile");
+  }
+
+  function reject(sub) {
+    var me = auth.getUser();
+    Promise.resolve(clipSubmissions.update(sub.id, {
+      status: "rejected",
+      decidedAt: new Date().toISOString(),
+      decidedBy: me ? me.id : null
+    })).then(function () { setTick(tick + 1); });
+    if (typeof bbToast === "function") bbToast("Clip declined");
+  }
+
+  return <Crd sx={{ marginBottom: 12, borderColor: "var(--ac)", borderWidth: 1, background: "var(--c2)" }}>
+    <Lbl>📺 Clip Submissions ({pending.length})</Lbl>
+    {pending.map(function (s) {
+      return <div key={s.id} style={{
+        background: "var(--c1)", borderRadius: 8, padding: "10px 12px",
+        border: "1px solid var(--b1)", marginBottom: 6
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <Tag c="var(--ac)" bg="var(--c2)">CLIP</Tag>
+          <div style={{ fontSize: 13, fontFamily: "Epilogue", color: "var(--tx)", fontWeight: 700 }}>
+            {s.userEmail}
+          </div>
+          <span style={{ fontSize: 11, color: "var(--dm)" }}>→ {s.breakerName || "(breaker)"} @ {s.eventName || "(event)"}</span>
+        </div>
+        <a href={s.url} target="_blank" rel="noreferrer"
+          style={{ fontSize: 11, color: "var(--ac)", fontFamily: "JetBrains Mono", wordBreak: "break-all", display: "block", marginBottom: 6 }}>
+          {s.url}
+        </a>
+        {s.message && <div style={{ fontSize: 11, color: "var(--dm)", fontStyle: "italic", marginBottom: 6 }}>"{s.message}"</div>}
+        <div style={{ display: "flex", gap: 6 }}>
+          <Btn v="gn" onClick={function () { approve(s); }} sx={{ flex: 1, fontSize: 11 }}>✓ Approve</Btn>
+          <Btn v="dg" onClick={function () { reject(s); }} sx={{ flex: 1, fontSize: 11 }}>✕ Reject</Btn>
+        </div>
+      </div>;
+    })}
+  </Crd>;
+}
+
 function Admin(p) {
   var _v = useState("home"), view = _v[0], setView = _v[1];
   var _s = useState(null), selId = _s[0], setSelId = _s[1];
@@ -9179,6 +12595,48 @@ function Admin(p) {
     ]} />
     <PlayerEditor profile={editProf} crews={p.crews}
     cityDB={p.cityDB} addCity={p.addCity}
+    allProfiles={p.profiles}
+    onMerge={function (primaryId, secondaryId) {
+      // Re-key all references from secondary → primary across events, extEvents, ROTN.
+      var profSnap = p.profiles, evSnap = p.events, extSnap = p.extEvents;
+      var secondary = p.profiles.find(function (x) { return x.id === secondaryId; });
+      var primary = p.profiles.find(function (x) { return x.id === primaryId; });
+      if (!secondary || !primary) return;
+      p.setEvents(function (prev) {
+        return prev.map(function (e) {
+          var players = (e.players || []).map(function (pl) {
+            return pl.pid === secondaryId ? Object.assign({}, pl, { pid: primaryId }) : pl;
+          });
+          var cypherKingPid = e.cypherKingPid === secondaryId ? primaryId : e.cypherKingPid;
+          var rotn = (e.roundsOfTheNight || []).map(function (r) {
+            return r.playerPid === secondaryId ? Object.assign({}, r, { playerPid: primaryId }) : r;
+          });
+          return Object.assign({}, e, { players: players, cypherKingPid: cypherKingPid, roundsOfTheNight: rotn });
+        });
+      });
+      p.setExtEvents(function (prev) {
+        return prev.map(function (ext) {
+          return Object.assign({}, ext, {
+            entries: (ext.entries || []).map(function (en) {
+              return en.pid === secondaryId ? Object.assign({}, en, { pid: primaryId }) : en;
+            })
+          });
+        });
+      });
+      // Union crews list so primary inherits any unique crew memberships from secondary.
+      p.setProfiles(function (prev) {
+        var mergedCrews = (primary.crews || []).slice();
+        (secondary.crews || []).forEach(function (sc) {
+          if (!mergedCrews.find(function (pc) { return pc.id === sc.id; })) mergedCrews.push(sc);
+        });
+        return prev
+          .filter(function (x) { return x.id !== secondaryId; })
+          .map(function (x) { return x.id === primaryId ? Object.assign({}, x, { crews: mergedCrews }) : x; });
+      });
+      bbToast("Merged \"" + (secondary.breakingName || secondary.fullName) + "\" into \"" + (primary.breakingName || primary.fullName) + "\"", function () {
+        p.setProfiles(profSnap); p.setEvents(evSnap); p.setExtEvents(extSnap);
+      });
+    }}
     onCancel={function () { setView("database") }}
     onDelete={function (id) {
       // Snapshot state so Undo can restore the breaker + all event associations
@@ -9253,10 +12711,8 @@ function Admin(p) {
   </div>;
 
   if (view === "rankings") return <div>
-    <Crumbs items={[{ label: "Home", onClick: goHome }, { label: "Rankings" }]} />
-    <RankingsView pR={stats.pR} cR={stats.cR}
-      cityR={stats.cityR} stateR={stats.stateR} countryR={stats.countryR}
-      events={p.events} extEvents={p.extEvents} profiles={p.profiles} crews={p.crews}
+    <Crumbs items={[{ label: "Home", onClick: goHome }, { label: "Rankings & Highlights" }]} />
+    <RankingsView events={p.events} profiles={p.profiles} crews={p.crews}
       onBack={function () { setView("home") }} />
   </div>;
 
@@ -9334,11 +12790,13 @@ function Admin(p) {
       <Btn onClick={function () { setView("create") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>+ Event</Btn>
       <Btn v="cr" onClick={function () { setEditExt(null); setView("extEdit") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>+ External</Btn>
       <Btn v="out" onClick={function () { setView("database") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>Breakers</Btn>
-      <Btn v="gn" onClick={function () { setView("rankings") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>Rankings</Btn>
+      <Btn v="gn" onClick={function () { setView("rankings") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>✨ Rankings &amp; Highlights</Btn>
       <Btn v="gh" onClick={function () { setView("settings") }} sx={{ flex: "1 1 auto", fontSize: 13 }}>Settings</Btn>
     </div>
 
     <ClaimsInbox profiles={p.profiles} crews={p.crews} />
+    <ClipInbox setEvents={p.setEvents} />
+    <RemovalInbox setProfiles={p.setProfiles} />
 
     {actEvs.length > 0 && <Lbl>Local Events</Lbl>}
     {actEvs.map(function (e) {
@@ -9428,6 +12886,21 @@ function RoleGate(p) {
   var _judgeEvents = useState([]), judgeEvents = _judgeEvents[0], setJudgeEvents = _judgeEvents[1];
 
   useEffect(function () { return auth.onChange(function (u) { setMe(u); }); }, []);
+
+  // Auto-open SignInModal when an embed breakout link lands here with ?signin=1.
+  // Strip the param so a page refresh doesn't re-open the modal forever.
+  useEffect(function () {
+    if (typeof window === "undefined") return;
+    try {
+      var sp = new URLSearchParams(window.location.search);
+      if (sp.get("signin") === "1") {
+        setShowAuth(true);
+        sp.delete("signin");
+        var rest = sp.toString();
+        window.history.replaceState({}, "", window.location.pathname + (rest ? "?" + rest : ""));
+      }
+    } catch (e) {}
+  }, []);
 
   // Once signed in, look up whether this email has any judge_grants.
   useEffect(function () {
@@ -9595,6 +13068,14 @@ export default function App() {
         if (data.crews) setCrews(data.crews);
         if (data.pins) setPins(data.pins);
         if (data.cityDB) setCityDB(data.cityDB);
+        // Seed lastWriteRef with the hydrated payload so the save effect's
+        // first run is a no-op — otherwise non-admin sessions log a futile
+        // "Supabase set failed" warning on every page load (RLS denies write).
+        lastWriteRef.current = JSON.stringify({
+          events: data.events || [], extEvents: data.extEvents || [],
+          profiles: data.profiles || [], crews: data.crews || [],
+          pins: data.pins || { admin: "", judge: "" }, cityDB: data.cityDB || {}
+        });
       }
       setLoaded(true);
       // Deep-link auto-route: ?event= / ?dancer= / ?crew= → drop into Audience.
@@ -9626,6 +13107,10 @@ export default function App() {
   var lastWriteRef = useRef("");
   useEffect(function () {
     if (!loaded) return;
+    // Embeds are read-only. They subscribe to realtime updates but never
+    // originate state changes worth persisting — and the user_data RLS denies
+    // writes from non-admin sessions anyway. Skip the futile write attempt.
+    if (embedCfg) return;
     var payload = { events: events, extEvents: extEvents, profiles: profiles, crews: crews, pins: pins, cityDB: cityDB };
     var serialized = JSON.stringify(payload);
     if (serialized === lastWriteRef.current) return; // no-op echo from realtime
@@ -9675,10 +13160,51 @@ export default function App() {
 
   // Embed mode short-circuits RoleGate + role views entirely.
   if (embedCfg) {
-    if (embedCfg.kind === "help") return <EmbedHelp />;
+    // Public embeds never see archived profiles (admin-approved removal requests).
+    var publicProfiles = (profiles || []).filter(function (pr) { return !pr.archived; });
+    if (embedCfg.kind === "help") return <EmbedHelp events={events} profiles={publicProfiles} crews={crews} />;
     if (embedCfg.kind === "leaderboard") return <LeaderboardEmbed
       config={embedCfg} events={events} extEvents={extEvents}
-      profiles={profiles} crews={crews} />;
+      profiles={publicProfiles} crews={crews} />;
+    if (embedCfg.kind === "live-event") return <LiveEventEmbed
+      config={embedCfg} events={events} profiles={publicProfiles} crews={crews} />;
+    if (embedCfg.kind === "dancer-profile") return <DancerProfileEmbed
+      config={embedCfg} events={events} extEvents={extEvents}
+      profiles={publicProfiles} crews={crews} />;
+    if (embedCfg.kind === "highlights") return <HighlightsEmbed
+      config={embedCfg} events={events} profiles={publicProfiles} crews={crews} />;
+    if (embedCfg.kind === "crew") return <CrewEmbed
+      config={embedCfg} events={events} profiles={publicProfiles} crews={crews} />;
+    if (embedCfg.kind === "event-recap") return <EventRecapEmbed
+      config={embedCfg} events={events} profiles={publicProfiles} crews={crews} />;
+    if (embedCfg.kind === "archive") return <EventArchiveEmbed
+      config={embedCfg} events={events} profiles={publicProfiles} crews={crews} />;
+    if (embedCfg.kind === "ticker") return <LiveTickerEmbed
+      config={embedCfg} events={events} />;
+    // Unknown embed kind (e.g. stale URL pointing at a removed widget) —
+    // render a small fallback instead of dropping the viewer onto RoleGate.
+    return <div style={Object.assign({}, CV, {
+      minHeight: 140, background: "var(--bg)", padding: 22, fontFamily: "Epilogue",
+      color: "var(--tx)", textAlign: "center"
+    })}>
+      <AppHead />
+      <div style={{ fontFamily: "JetBrains Mono", fontSize: 10, letterSpacing: ".15em", color: "var(--dm)", marginBottom: 8 }}>
+        CYPHER NET — WIDGET NOT FOUND
+      </div>
+      <div style={{ fontFamily: "Anton, Epilogue, sans-serif", fontSize: 22, fontWeight: 400, color: "var(--tx)", marginBottom: 10, lineHeight: 1.1 }}>
+        This widget moved or was retired.
+      </div>
+      <div style={{ fontSize: 12, color: "var(--dm)", marginBottom: 14, lineHeight: 1.5 }}>
+        The "<b>{embedCfg.kind}</b>" widget is no longer available. The owner can browse the current widget family in the builder.
+      </div>
+      <a href={(typeof window !== "undefined" ? window.location.origin : "") + "/?embed=help"} target="_top" rel="noopener noreferrer" style={{
+        display: "inline-block", padding: "8px 14px",
+        fontSize: 11, fontFamily: "JetBrains Mono", letterSpacing: ".12em", fontWeight: 800,
+        color: "var(--ac)", border: "1px solid var(--ac)", borderRadius: 6,
+        textDecoration: "none"
+      }}>BROWSE WIDGETS ↗</a>
+      <EmbedAttrib />
+    </div>;
   }
 
   if (!role) return <div><RoleGate onRole={setRole} pins={pins} />
