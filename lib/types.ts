@@ -1,47 +1,109 @@
-// Cypher Net Types
+/**
+ * The format of a participant in a battle.
+ * - "crew"  → a named team with multiple members (e.g. "Static Force" with 3 dancers)
+ * - "solo"  → a single individual competing under their own alias
+ */
+export type EventFormat = "crew" | "solo"
 
-export type LeaderboardCategory = 
-  | 'overall' 
-  | 'battles' 
-  | 'events' 
-  | 'community'
-  | 'monthly'
-
-export interface Dancer {
+/**
+ * A single participant in the event — either a crew or a solo dancer.
+ */
+export interface Participant {
+  /** Unique identifier for this participant within the event */
   id: string
+  /** Display name — crew name OR dancer alias */
   name: string
-  alias?: string
-  crew?: string
-  avatar?: string
-  city?: string
-  country?: string
+  /** "crew" or "solo" */
+  format: EventFormat
+  /**
+   * Members of the crew. Required when format === "crew".
+   * Leave as empty array when format === "solo".
+   */
+  members: string[]
+  /**
+   * Final placement in the event.
+   * Standard bracket placements: 1=Champion, 2=Runner-up, 3=3rd/4th, 5=5th-8th, 9=9th-16th
+   */
+  placement: number
 }
 
-export interface RankingEntry {
-  rank: number
-  dancer: Dancer
-  points: number
-  wins: number
-  losses: number
-  battles: number
-  trend: 'up' | 'down' | 'stable'
-  trendValue?: number
-  lastEvent?: string
-  lastEventDate?: string
+/**
+ * The result of a single head-to-head battle.
+ * Supports 3-judge panels (3-0, 2-1) and tiebreaker situations.
+ */
+export interface BattleResult {
+  /** ID referencing a Participant in the redCorner */
+  redCorner: string
+  /** ID referencing a Participant in the blueCorner */
+  blueCorner: string
+  /**
+   * ID of the winning Participant.
+   * Must match either redCorner or blueCorner.
+   */
+  winner: string
+  /**
+   * The judge vote breakdown.
+   * - "3-0"         → unanimous decision
+   * - "2-1"         → split decision
+   * - "tiebreaker"  → judges were tied; a tiebreaker round determined the winner
+   */
+  score: "3-0" | "2-1" | "tiebreaker"
+  /** Optional short note (e.g. "Extended tiebreaker — went to a 2nd extra round") */
+  note?: string
 }
 
-export interface LeaderboardData {
-  category: LeaderboardCategory
-  title: string
-  entries: RankingEntry[]
-  lastUpdated: string
+/**
+ * A single round in the bracket (e.g. "Top 16", "Top 8", "Semi-Finals", "Final").
+ */
+export interface BracketRound {
+  /**
+   * Display label for this round.
+   * Recommended: "Top 16" | "Top 8" | "Quarter-Finals" | "Semi-Finals" | "Final"
+   */
+  label: string
+  /** All battles in this round, in bracket order top-to-bottom */
+  battles: BattleResult[]
 }
 
-export interface WidgetConfig {
-  category?: LeaderboardCategory
-  limit?: number
-  showTrend?: boolean
-  showStats?: boolean
-  theme?: 'light' | 'dark' | 'auto'
-  compact?: boolean
+/**
+ * The full tournament bracket for an event.
+ */
+export interface TournamentBracket {
+  /** How many participants made the bracket. Typical values: 8 or 16 */
+  size: 8 | 16
+  /**
+   * Rounds in chronological order — earliest round first, Final last.
+   * Example Top 8: ["Top 8" (4 battles), "Semi-Finals" (2 battles), "Final" (1 battle)]
+   */
+  rounds: BracketRound[]
+}
+
+/**
+ * The top-level event recap object. One object = one event.
+ */
+export interface EventRecap {
+  /**
+   * URL-safe unique ID — used as the route param in /events/[id].
+   * Use kebab-case, e.g. "cypher-space-vol-3"
+   */
+  id: string
+  /** Full display name of the event */
+  name: string
+  /** Date of the event — ISO 8601 format: "YYYY-MM-DD" */
+  date: string
+  /** City / venue shown on cards. E.g. "Vancouver, BC" */
+  location: string
+  /** Short 1–2 sentence description shown on the event index card */
+  description: string
+  /**
+   * Dominant format of the event.
+   * "crew" = crew vs crew battles, "solo" = 1v1 individual battles
+   */
+  format: EventFormat
+  /** ID of the winning Participant (must exist in participants array) */
+  eventWinnerId: string
+  /** All participants who made the bracket — Top 8 or Top 16 */
+  participants: Participant[]
+  /** The full tournament bracket */
+  bracket: TournamentBracket
 }
