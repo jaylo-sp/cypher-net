@@ -47,6 +47,9 @@
   --gold: #fbbf24;
   --silver: #9ca3af;
   --bronze: #d97706;
+  --judge-red: #dc2626;
+  --judge-blue: #2563eb;
+  --judge-tie: #9ca3af;
 }
 
 .dark {
@@ -93,6 +96,9 @@
   --gold: #fbbf24;
   --silver: #9ca3af;
   --bronze: #d97706;
+  --judge-red: #ef4444;
+  --judge-blue: #3b82f6;
+  --judge-tie: #6b7280;
 }
 
 @theme inline {
@@ -126,6 +132,9 @@
   --color-gold: var(--gold);
   --color-silver: var(--silver);
   --color-bronze: var(--bronze);
+  --color-judge-red: var(--judge-red);
+  --color-judge-blue: var(--judge-blue);
+  --color-judge-tie: var(--judge-tie);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

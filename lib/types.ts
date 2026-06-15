@@ -28,6 +28,19 @@ export interface Participant {
 }
 
 /**
+ * A single judge's vote in a battle.
+ * - "red"  → voted for the participant in the red corner
+ * - "blue" → voted for the participant in the blue corner
+ * - "tie"  → scored the battle even / could not decide
+ */
+export interface JudgeVote {
+  /** The judge's name or alias (e.g. "Roxrite") */
+  judge: string
+  /** Which corner this judge voted for */
+  vote: "red" | "blue" | "tie"
+}
+
+/**
  * The result of a single head-to-head battle.
  * Supports 3-judge panels (3-0, 2-1) and tiebreaker situations.
  */
@@ -49,6 +62,12 @@ export interface BattleResult {
    */
   score: "3-0" | "2-1" | "tiebreaker"
   /**
+   * The individual judge votes that produced this result.
+   * For a tiebreaker, these are the deadlocked first-round votes.
+   * Order is the judge panel order. Recommended: one entry per judge.
+   */
+  judgeVotes?: JudgeVote[]
+  /**
    * Only used when score === "tiebreaker".
    * The deadlocked judge vote that triggered the tiebreaker round.
    * e.g. "1-1-1" (3 judges all split) or "1-1" (2 judges tied)
@@ -60,6 +79,11 @@ export interface BattleResult {
    * e.g. "2-1", "3-0", or "Crowd decision"
    */
   tiebreakerScore?: string
+  /**
+   * Only used when score === "tiebreaker".
+   * The individual judge votes cast in the tiebreaker round.
+   */
+  tiebreakerVotes?: JudgeVote[]
   /** Optional short note (e.g. "Extended tiebreaker — went to a 2nd extra round") */
   note?: string
 }

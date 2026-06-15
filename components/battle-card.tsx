@@ -1,6 +1,7 @@
 "use client"
 
 import type { BattleResult, Participant } from "@/lib/types"
+import { JudgeVotes } from "@/components/judge-votes"
 
 interface BattleCardProps {
   battle: BattleResult
@@ -47,8 +48,11 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
             winner === battle.redCorner ? "bg-foreground text-background" : "text-muted-foreground"
           }`}
         >
-          <span className="text-xs font-bold truncate max-w-[110px] uppercase tracking-wide">
-            {red?.name ?? battle.redCorner}
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-judge-red shrink-0" />
+            <span className="text-xs font-bold truncate max-w-[100px] uppercase tracking-wide">
+              {red?.name ?? battle.redCorner}
+            </span>
           </span>
           {winner === battle.redCorner && (
             <span className="text-[10px] font-mono ml-1 shrink-0">W</span>
@@ -60,15 +64,18 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
             winner === battle.blueCorner ? "bg-foreground text-background" : "text-muted-foreground"
           }`}
         >
-          <span className="text-xs font-bold truncate max-w-[110px] uppercase tracking-wide">
-            {blue?.name ?? battle.blueCorner}
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-judge-blue shrink-0" />
+            <span className="text-xs font-bold truncate max-w-[100px] uppercase tracking-wide">
+              {blue?.name ?? battle.blueCorner}
+            </span>
           </span>
           {winner === battle.blueCorner && (
             <span className="text-[10px] font-mono ml-1 shrink-0">W</span>
           )}
         </div>
         {/* Score strip */}
-        <div className="border-t border-border px-3 py-1.5 flex items-center gap-1.5 flex-wrap">
+        <div className="border-t border-border px-3 py-1.5 flex items-center justify-between gap-1.5 flex-wrap">
           {battle.score === "tiebreaker" ? (
             <>
               <span className="inline-block px-1.5 py-0.5 text-[10px] font-mono font-bold tracking-wider bg-border text-foreground">
@@ -81,6 +88,12 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
             </>
           ) : (
             <ScoreBadge score={battle.score} />
+          )}
+          {battle.judgeVotes && battle.judgeVotes.length > 0 && (
+            <JudgeVotes
+              votes={battle.score === "tiebreaker" && battle.tiebreakerVotes ? battle.tiebreakerVotes : battle.judgeVotes}
+              compact
+            />
           )}
         </div>
       </div>
@@ -97,13 +110,16 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
             : "bg-card text-muted-foreground"
         }`}
       >
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-sm font-bold uppercase tracking-widest truncate">
-            {red?.name ?? battle.redCorner}
-          </span>
-          {red?.format === "crew" && red.members.length > 0 && (
-            <span className="text-[11px] opacity-70 truncate">{red.members.join(", ")}</span>
-          )}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-full bg-judge-red shrink-0" aria-label="Red corner" />
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-bold uppercase tracking-widest truncate">
+              {red?.name ?? battle.redCorner}
+            </span>
+            {red?.format === "crew" && red.members.length > 0 && (
+              <span className="text-[11px] opacity-70 truncate">{red.members.join(", ")}</span>
+            )}
+          </div>
         </div>
         {winner === battle.redCorner && (
           <span className="text-xs font-mono font-bold ml-3 shrink-0 border border-current px-1.5 py-0.5">
@@ -120,13 +136,16 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
             : "bg-card text-muted-foreground"
         }`}
       >
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-sm font-bold uppercase tracking-widest truncate">
-            {blue?.name ?? battle.blueCorner}
-          </span>
-          {blue?.format === "crew" && blue.members.length > 0 && (
-            <span className="text-[11px] opacity-70 truncate">{blue.members.join(", ")}</span>
-          )}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-full bg-judge-blue shrink-0" aria-label="Blue corner" />
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-bold uppercase tracking-widest truncate">
+              {blue?.name ?? battle.blueCorner}
+            </span>
+            {blue?.format === "crew" && blue.members.length > 0 && (
+              <span className="text-[11px] opacity-70 truncate">{blue.members.join(", ")}</span>
+            )}
+          </div>
         </div>
         {winner === battle.blueCorner && (
           <span className="text-xs font-mono font-bold ml-3 shrink-0 border border-current px-1.5 py-0.5">
@@ -135,8 +154,8 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
         )}
       </div>
 
-      {/* Score + note strip */}
-      <div className="border-t border-border px-4 py-2.5 flex flex-col gap-2 bg-muted/30">
+      {/* Score + judges + note strip */}
+      <div className="border-t border-border px-4 py-3 flex flex-col gap-3 bg-muted/30">
         {battle.score === "tiebreaker" ? (
           <div className="flex flex-wrap items-center gap-2">
             {/* Original deadlocked judge score */}
@@ -162,6 +181,18 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
         ) : (
           <ScoreBadge score={battle.score} />
         )}
+
+        {/* Per-judge vote breakdown */}
+        {battle.judgeVotes && battle.judgeVotes.length > 0 && (
+          <JudgeVotes
+            votes={battle.judgeVotes}
+            label={battle.score === "tiebreaker" ? "First round (tied)" : "Judge votes"}
+          />
+        )}
+        {battle.score === "tiebreaker" && battle.tiebreakerVotes && battle.tiebreakerVotes.length > 0 && (
+          <JudgeVotes votes={battle.tiebreakerVotes} label="Tiebreaker round" />
+        )}
+
         {battle.note && (
           <p className="text-[11px] text-muted-foreground leading-snug">{battle.note}</p>
         )}

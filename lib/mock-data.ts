@@ -28,8 +28,11 @@
  *      .blueCorner  — participant id
  *      .winner      — participant id (must be redCorner or blueCorner)
  *      .score       — "3-0" | "2-1" | "tiebreaker"
+ *      .judgeVotes  — array of { judge: "Name", vote: "red" | "blue" | "tie" }
+ *                     "red"/"blue" = voted for that corner, "tie" = scored it even
  *      .tiedScore   — only for tiebreakers: the deadlocked judge vote, e.g. "1-1-1"
  *      .tiebreakerScore — only for tiebreakers: how it was decided, e.g. "2-1"
+ *      .tiebreakerVotes — only for tiebreakers: judge votes in the tiebreaker round
  *      .note        — optional string
  */
 
@@ -117,24 +120,44 @@ export const events: EventRecap[] = [
               blueCorner: "north-shore-kollective",
               winner: "static-force",
               score: "3-0",
+              judgeVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "red" },
+                { judge: "Roxrite", vote: "red" },
+              ],
             },
             {
               redCorner: "east-van-rockers",
               blueCorner: "tri-city-force",
               winner: "east-van-rockers",
               score: "2-1",
+              judgeVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "red" },
+                { judge: "Roxrite", vote: "blue" },
+              ],
             },
             {
               redCorner: "soul-city",
               blueCorner: "surrey-movement",
               winner: "soul-city",
               score: "2-1",
+              judgeVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "blue" },
+                { judge: "Roxrite", vote: "red" },
+              ],
             },
             {
               redCorner: "burnaby-breakers",
               blueCorner: "new-west-crew",
               winner: "burnaby-breakers",
               score: "3-0",
+              judgeVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "red" },
+                { judge: "Roxrite", vote: "red" },
+              ],
             },
           ],
         },
@@ -146,6 +169,11 @@ export const events: EventRecap[] = [
               blueCorner: "burnaby-breakers",
               winner: "static-force",
               score: "2-1",
+              judgeVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "blue" },
+                { judge: "Roxrite", vote: "red" },
+              ],
             },
             {
               redCorner: "east-van-rockers",
@@ -154,6 +182,16 @@ export const events: EventRecap[] = [
               score: "tiebreaker",
               tiedScore: "1-1-1",
               tiebreakerScore: "2-1",
+              judgeVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "blue" },
+                { judge: "Roxrite", vote: "tie" },
+              ],
+              tiebreakerVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "red" },
+                { judge: "Roxrite", vote: "blue" },
+              ],
               note: "Went to a second tiebreaker round after judges deadlocked 1-1-1.",
             },
           ],
@@ -166,6 +204,11 @@ export const events: EventRecap[] = [
               blueCorner: "east-van-rockers",
               winner: "static-force",
               score: "2-1",
+              judgeVotes: [
+                { judge: "Kujo", vote: "red" },
+                { judge: "Sunni", vote: "red" },
+                { judge: "Roxrite", vote: "blue" },
+              ],
               note: "Close final — Static Force took it with a last-round power move showcase.",
             },
           ],
@@ -210,30 +253,30 @@ export const events: EventRecap[] = [
         {
           label: "Top 16",
           battles: [
-            { redCorner: "victorious", blueCorner: "drift", winner: "victorious", score: "3-0" },
-            { redCorner: "d-style", blueCorner: "comet", winner: "d-style", score: "3-0" },
-            { redCorner: "flow", blueCorner: "anchor", winner: "flow", score: "2-1" },
-            { redCorner: "machine", blueCorner: "haze", winner: "machine", score: "2-1" },
-            { redCorner: "blaze", blueCorner: "phantom", winner: "blaze", score: "3-0" },
-            { redCorner: "echo", blueCorner: "spin", winner: "echo", score: "tiebreaker", tiedScore: "1-1-1", tiebreakerScore: "3-0", note: "Tiebreaker battle after a 1-1-1 split." },
-            { redCorner: "nova", blueCorner: "jazz", winner: "nova", score: "2-1" },
-            { redCorner: "air", blueCorner: "orbit", winner: "air", score: "2-1" },
+            { redCorner: "victorious", blueCorner: "drift", winner: "victorious", score: "3-0", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "red" }] },
+            { redCorner: "d-style", blueCorner: "comet", winner: "d-style", score: "3-0", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "red" }] },
+            { redCorner: "flow", blueCorner: "anchor", winner: "flow", score: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "blue" }] },
+            { redCorner: "machine", blueCorner: "haze", winner: "machine", score: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "blue" }, { judge: "Focus", vote: "red" }] },
+            { redCorner: "blaze", blueCorner: "phantom", winner: "blaze", score: "3-0", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "red" }] },
+            { redCorner: "echo", blueCorner: "spin", winner: "echo", score: "tiebreaker", tiedScore: "1-1-1", tiebreakerScore: "3-0", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "blue" }, { judge: "Focus", vote: "tie" }], tiebreakerVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "red" }], note: "Tiebreaker battle after a 1-1-1 split." },
+            { redCorner: "nova", blueCorner: "jazz", winner: "nova", score: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "blue" }] },
+            { redCorner: "air", blueCorner: "orbit", winner: "air", score: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "blue" }, { judge: "Focus", vote: "red" }] },
           ],
         },
         {
           label: "Top 8",
           battles: [
-            { redCorner: "victorious", blueCorner: "air", winner: "victorious", score: "3-0" },
-            { redCorner: "d-style", blueCorner: "nova", winner: "d-style", score: "2-1" },
-            { redCorner: "flow", blueCorner: "echo", winner: "flow", score: "2-1" },
-            { redCorner: "machine", blueCorner: "blaze", winner: "machine", score: "3-0" },
+            { redCorner: "victorious", blueCorner: "air", winner: "victorious", score: "3-0", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "red" }] },
+            { redCorner: "d-style", blueCorner: "nova", winner: "d-style", score: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "blue" }] },
+            { redCorner: "flow", blueCorner: "echo", winner: "flow", score: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "blue" }, { judge: "Focus", vote: "red" }] },
+            { redCorner: "machine", blueCorner: "blaze", winner: "machine", score: "3-0", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "red" }] },
           ],
         },
         {
           label: "Semi-Finals",
           battles: [
-            { redCorner: "victorious", blueCorner: "machine", winner: "victorious", score: "2-1" },
-            { redCorner: "d-style", blueCorner: "flow", winner: "d-style", score: "tiebreaker", tiedScore: "1-1", tiebreakerScore: "2-1", note: "Extended tiebreaker — judges split 1-1 twice before a final call." },
+            { redCorner: "victorious", blueCorner: "machine", winner: "victorious", score: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "blue" }] },
+            { redCorner: "d-style", blueCorner: "flow", winner: "d-style", score: "tiebreaker", tiedScore: "1-1-1", tiebreakerScore: "2-1", judgeVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "blue" }, { judge: "Focus", vote: "tie" }], tiebreakerVotes: [{ judge: "Cloud", vote: "red" }, { judge: "Pebbles", vote: "red" }, { judge: "Focus", vote: "blue" }], note: "Extended tiebreaker — judges split before a final call." },
           ],
         },
         {
@@ -244,6 +287,11 @@ export const events: EventRecap[] = [
               blueCorner: "d-style",
               winner: "victorious",
               score: "2-1",
+              judgeVotes: [
+                { judge: "Cloud", vote: "red" },
+                { judge: "Pebbles", vote: "red" },
+                { judge: "Focus", vote: "blue" },
+              ],
               note: "Victorious defended the title with relentless footwork in the final round.",
             },
           ],
@@ -286,9 +334,15 @@ export const events: EventRecap[] = [
 //             blueCorner: "crew-b",
 //             winner: "crew-a",
 //             score: "2-1",             // "3-0" | "2-1" | "tiebreaker"
-//             // For tiebreakers only — add both of these:
+//             judgeVotes: [             // one entry per judge; "red" | "blue" | "tie"
+//               { judge: "Judge 1", vote: "red" },
+//               { judge: "Judge 2", vote: "red" },
+//               { judge: "Judge 3", vote: "blue" },
+//             ],
+//             // For tiebreakers only — add these:
 //             // tiedScore: "1-1-1",       // the deadlocked judge vote
 //             // tiebreakerScore: "2-1",   // how the tiebreaker was decided
+//             // tiebreakerVotes: [ ... ], // judge votes in the tiebreaker round
 //             note: "Optional note.",   // omit if none
 //           },
 //         ],

@@ -4,6 +4,7 @@ import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { BracketTree } from "@/components/bracket-tree"
 import { ParticipantsPanel } from "@/components/participants-panel"
+import { JudgeLegend } from "@/components/judge-votes"
 import { events } from "@/lib/mock-data"
 
 interface PageProps {
@@ -99,9 +100,12 @@ export default async function EventPage({ params }: PageProps) {
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10 items-start">
             {/* Left: Bracket */}
             <div>
-              <h2 className="text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground border-b border-border pb-2 mb-6">
-                Tournament Bracket
-              </h2>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2 mb-6">
+                <h2 className="text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">
+                  Tournament Bracket
+                </h2>
+                <JudgeLegend />
+              </div>
               <BracketTree
                 bracket={event.bracket}
                 participants={event.participants}

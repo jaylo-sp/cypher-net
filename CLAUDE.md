@@ -51,6 +51,7 @@ Types are defined in `lib/types.ts`. Every interface and field has JSDoc comment
 - Every `battle.redCorner`, `battle.blueCorner`, and `battle.winner` must match a `participant.id` in the same event.
 - `bracket.size` must be `8` or `16`.
 - For a tiebreaker battle, set `score: "tiebreaker"` and add `tiedScore` (the deadlocked judge vote, e.g. `"1-1-1"`) and `tiebreakerScore` (how it was decided, e.g. `"2-1"`).
+- Add `judgeVotes` to each battle — an array of `{ judge, vote }` where `vote` is `"red"` (voted red corner), `"blue"` (voted blue corner), or `"tie"`. For tiebreakers, `judgeVotes` is the deadlocked first round and `tiebreakerVotes` holds the tiebreaker-round votes. Red corner renders red, blue corner blue, tie grey.
 
 ### Admin Form (Alternative)
 

@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
-import type { EventRecap, Participant, BracketRound, BattleResult, EventFormat } from "@/lib/types"
+import type { EventRecap, Participant, BracketRound, BattleResult, EventFormat, JudgeVote } from "@/lib/types"
 
 // ─── Types for form state ──────────────────────────────────────────────────
 
@@ -23,6 +23,10 @@ interface FormBattle {
   score: BattleResult["score"]
   tiedScore: string
   tiebreakerScore: string
+  /** Judge name → vote ("red" | "blue" | "tie") for the main/first decision */
+  votes: Record<string, JudgeVote["vote"]>
+  /** Judge name → vote for the tiebreaker round (only used for tiebreakers) */
+  tbVotes: Record<string, JudgeVote["vote"]>
   note: string
 }
 
@@ -43,8 +47,24 @@ const STEP_LABELS: Record<Step, string> = {
 const SCORE_OPTIONS: BattleResult["score"][] = ["3-0", "2-1", "tiebreaker"]
 
 function emptyBattle(): FormBattle {
-  return { redCorner: "", blueCorner: "", winner: "", score: "2-1", tiedScore: "", tiebreakerScore: "", note: "" }
+  return {
+    redCorner: "",
+    blueCorner: "",
+    winner: "",
+    score: "2-1",
+    tiedScore: "",
+    tiebreakerScore: "",
+    votes: {},
+    tbVotes: {},
+    note: "",
+  }
 }
+
+const VOTE_OPTIONS: { label: string; value: JudgeVote["vote"] }[] = [
+  { label: "Red corner", value: "red" },
+  { label: "Blue corner", value: "blue" },
+  { label: "Tie", value: "tie" },
+]
 
 function emptyRound(label: string): FormRound {
   return { label, battles: [emptyBattle()] }
@@ -146,7 +166,14 @@ export default function AdminPage() {
     format: "crew" as EventFormat,
     eventWinnerId: "",
     bracketSize: "8" as "8" | "16",
+    judges: "",
   })
+
+  // Derived list of judge names from the comma-separated info.judges field
+  const judgeList = info.judges
+    .split(",")
+    .map((j) => j.trim())
+    .filter(Boolean)
 
   // Step 2 — Participants
   const [participants, setParticipants] = useState<FormParticipant[]>([
@@ -237,6 +264,25 @@ export default function AdminPage() {
     })
   }
 
+  function updateBattleVote(
+    rIdx: number,
+    bIdx: number,
+    field: "votes" | "tbVotes",
+    judge: string,
+    vote: JudgeVote["vote"],
+  ) {
+    setRounds((prev) => {
+      const next = [...prev]
+      const battles = [...next[rIdx].battles]
+      battles[bIdx] = {
+        ...battles[bIdx],
+        [field]: { ...battles[bIdx][field], [judge]: vote },
+      }
+      next[rIdx] = { ...next[rIdx], battles }
+      return next
+    })
+  }
+
   // ── Build output JSON ──
 
   function buildEventRecap(): EventRecap {
@@ -250,6 +296,9 @@ export default function AdminPage() {
       placement: parseInt(p.placement, 10) || 5,
     }))
 
+    const buildVotes = (votes: Record<string, JudgeVote["vote"]>): JudgeVote[] =>
+      judgeList.map((judge) => ({ judge, vote: votes[judge] ?? "tie" }))
+
     const builtRounds: BracketRound[] = rounds.map((r) => ({
       label: r.label,
       battles: r.battles.map((b) => ({
@@ -257,9 +306,13 @@ export default function AdminPage() {
         blueCorner: b.blueCorner,
         winner: b.winner,
         score: b.score,
+        ...(judgeList.length > 0 ? { judgeVotes: buildVotes(b.votes) } : {}),
         ...(b.score === "tiebreaker" && b.tiedScore ? { tiedScore: b.tiedScore } : {}),
         ...(b.score === "tiebreaker" && b.tiebreakerScore
           ? { tiebreakerScore: b.tiebreakerScore }
+          : {}),
+        ...(b.score === "tiebreaker" && judgeList.length > 0
+          ? { tiebreakerVotes: buildVotes(b.tbVotes) }
           : {}),
         ...(b.note ? { note: b.note } : {}),
       })),
@@ -410,6 +463,18 @@ export default function AdminPage() {
                         ]}
                       />
                     </div>
+                  </div>
+                  <div>
+                    <Label>Judges (comma-separated)</Label>
+                    <Input
+                      value={info.judges}
+                      onChange={(v) => updateInfo("judges", v)}
+                      placeholder="Kujo, Sunni, Roxrite"
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
+                      Add the judge panel here. Each battle will let you set how every
+                      judge voted (red / blue / tie). Leave blank to skip judge votes.
+                    </p>
                   </div>
                 </div>
               )}
@@ -631,6 +696,72 @@ export default function AdminPage() {
                                   </div>
                                 </div>
                               )}
+                              {judgeList.length > 0 && (
+                                <div className="sm:col-span-2 border border-border p-3 flex flex-col gap-3">
+                                  <div>
+                                    <Label>
+                                      {battle.score === "tiebreaker"
+                                        ? "Judge Votes — First Round (tied)"
+                                        : "Judge Votes"}
+                                    </Label>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {judgeList.map((judge) => (
+                                        <div
+                                          key={judge}
+                                          className="flex items-center gap-2"
+                                        >
+                                          <span className="text-[11px] font-mono uppercase tracking-wide text-muted-foreground w-20 shrink-0 truncate">
+                                            {judge}
+                                          </span>
+                                          <Select
+                                            value={battle.votes[judge] ?? "tie"}
+                                            onChange={(v) =>
+                                              updateBattleVote(
+                                                rIdx,
+                                                bIdx,
+                                                "votes",
+                                                judge,
+                                                v as JudgeVote["vote"],
+                                              )
+                                            }
+                                            options={VOTE_OPTIONS}
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  {battle.score === "tiebreaker" && (
+                                    <div>
+                                      <Label>Judge Votes — Tiebreaker Round</Label>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {judgeList.map((judge) => (
+                                          <div
+                                            key={judge}
+                                            className="flex items-center gap-2"
+                                          >
+                                            <span className="text-[11px] font-mono uppercase tracking-wide text-muted-foreground w-20 shrink-0 truncate">
+                                              {judge}
+                                            </span>
+                                            <Select
+                                              value={battle.tbVotes[judge] ?? "tie"}
+                                              onChange={(v) =>
+                                                updateBattleVote(
+                                                  rIdx,
+                                                  bIdx,
+                                                  "tbVotes",
+                                                  judge,
+                                                  v as JudgeVote["vote"],
+                                                )
+                                              }
+                                              options={VOTE_OPTIONS}
+                                            />
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               <div className="sm:col-span-2">
                                 <Label>Note (optional)</Label>
                                 <Input
@@ -706,7 +837,7 @@ export default function AdminPage() {
                       onClick={() => {
                         setStep("info")
                         setExported(null)
-                        setInfo({ id: "", name: "", date: "", location: "", description: "", format: "crew", eventWinnerId: "", bracketSize: "8" })
+                        setInfo({ id: "", name: "", date: "", location: "", description: "", format: "crew", eventWinnerId: "", bracketSize: "8", judges: "" })
                         setParticipants([emptyParticipant(), emptyParticipant()])
                         setRounds([emptyRound("Top 8"), emptyRound("Semi-Finals"), emptyRound("Final")])
                       }}
