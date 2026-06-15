@@ -5,19 +5,17 @@ import { Footer } from "@/components/footer"
 import { BracketTree } from "@/components/bracket-tree"
 import { ParticipantsPanel } from "@/components/participants-panel"
 import { JudgeLegend } from "@/components/judge-votes"
-import { events } from "@/lib/mock-data"
+import { getEventById } from "@/lib/events"
+
+export const dynamic = "force-dynamic"
 
 interface PageProps {
   params: Promise<{ id: string }>
 }
 
-export async function generateStaticParams() {
-  return events.map((e) => ({ id: e.id }))
-}
-
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params
-  const event = events.find((e) => e.id === id)
+  const event = await getEventById(id)
   if (!event) return {}
   return {
     title: `${event.name} — Cypher Net`,
@@ -27,7 +25,7 @@ export async function generateMetadata({ params }: PageProps) {
 
 export default async function EventPage({ params }: PageProps) {
   const { id } = await params
-  const event = events.find((e) => e.id === id)
+  const event = await getEventById(id)
   if (!event) notFound()
 
   const dateObj = new Date(event.date + "T00:00:00")

@@ -1,9 +1,12 @@
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { EventCard } from "@/components/event-card"
-import { events } from "@/lib/mock-data"
+import { getAllEvents } from "@/lib/events"
 
-export default function HomePage() {
+export const dynamic = "force-dynamic"
+
+export default async function HomePage() {
+  const events = await getAllEvents()
   const sorted = [...events].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   )

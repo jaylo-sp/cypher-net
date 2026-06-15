@@ -4,6 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
+import { syncEvent } from "@/app/admin/actions"
 import type { EventRecap, Participant, BracketRound, BattleResult, EventFormat, JudgeVote } from "@/lib/types"
 
 // ─── Types for form state ──────────────────────────────────────────────────
@@ -189,6 +190,8 @@ export default function AdminPage() {
   ])
 
   const [exported, setExported] = useState<string | null>(null)
+  const [syncState, setSyncState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   // ── Helpers ──
 
@@ -337,7 +340,22 @@ export default function AdminPage() {
   function handleExport() {
     const recap = buildEventRecap()
     setExported(JSON.stringify(recap, null, 2))
+    setSyncState("idle")
+    setSyncError(null)
     setStep("review")
+  }
+
+  async function handleSync() {
+    setSyncState("saving")
+    setSyncError(null)
+    const recap = buildEventRecap()
+    const result = await syncEvent(recap)
+    if (result.ok) {
+      setSyncState("saved")
+    } else {
+      setSyncState("error")
+      setSyncError(result.error ?? "Sync failed.")
+    }
   }
 
   function prev() {
@@ -791,12 +809,49 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* ─── STEP 4: Review & Export ─── */}
+              {/* ─── STEP 4: Review & Publish ─── */}
               {step === "review" && exported && (
                 <div className="flex flex-col gap-5">
+                  {/* Primary: publish to Supabase */}
+                  <div className="border border-foreground bg-foreground text-background p-4">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-70 mb-1">
+                      Publish
+                    </p>
+                    <p className="text-sm leading-relaxed opacity-90 mb-3">
+                      Push this event to Supabase. It goes live on the site and every
+                      embedded widget within about a minute.
+                    </p>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button
+                        onClick={handleSync}
+                        disabled={syncState === "saving"}
+                        className="px-5 py-2.5 bg-background text-foreground text-xs font-mono uppercase tracking-wider hover:opacity-80 transition-opacity disabled:opacity-50"
+                      >
+                        {syncState === "saving"
+                          ? "Publishing…"
+                          : syncState === "saved"
+                          ? "Published ✓ — Re-publish"
+                          : "Publish to Supabase"}
+                      </button>
+                      {syncState === "saved" && (
+                        <Link
+                          href={`/events/${info.id}`}
+                          className="text-xs font-mono uppercase tracking-wider underline underline-offset-4 opacity-90 hover:opacity-100"
+                        >
+                          View event
+                        </Link>
+                      )}
+                    </div>
+                    {syncState === "error" && (
+                      <p className="mt-2 text-xs font-mono text-destructive-foreground bg-destructive px-2 py-1 inline-block">
+                        {syncError}
+                      </p>
+                    )}
+                  </div>
+
                   <div className="border border-border bg-muted/30 p-4">
                     <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground mb-3">
-                      How to add this event
+                      Alternative — Hardcode in mock data
                     </p>
                     <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
                       <li>
@@ -807,7 +862,7 @@ export default function AdminPage() {
                       </li>
                       <li>Find the <code className="font-mono text-xs bg-background px-1 border border-border">events</code> array</li>
                       <li>Paste the JSON below as a new item in the array</li>
-                      <li>Save the file — the event will appear immediately</li>
+                      <li>Save the file — used as a fallback when Supabase is empty</li>
                     </ol>
                   </div>
 

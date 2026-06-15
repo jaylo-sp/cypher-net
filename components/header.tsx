@@ -37,6 +37,12 @@ export function Header() {
               Add Event
             </Link>
             <Link
+              href="/widget"
+              className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Widget
+            </Link>
+            <Link
               href="https://cypher-space.ca"
               target="_blank"
               rel="noopener noreferrer"
