@@ -68,8 +68,20 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
           )}
         </div>
         {/* Score strip */}
-        <div className="border-t border-border px-3 py-1.5 flex items-center gap-2">
-          <ScoreBadge score={battle.score} />
+        <div className="border-t border-border px-3 py-1.5 flex items-center gap-1.5 flex-wrap">
+          {battle.score === "tiebreaker" ? (
+            <>
+              <span className="inline-block px-1.5 py-0.5 text-[10px] font-mono font-bold tracking-wider bg-border text-foreground">
+                {battle.tiedScore ?? "TIED"}
+              </span>
+              <span className="text-muted-foreground text-[10px] font-mono">→</span>
+              <span className="inline-block px-1.5 py-0.5 text-[10px] font-mono font-bold tracking-wider uppercase bg-accent text-accent-foreground">
+                {battle.tiebreakerScore ?? "TB"}
+              </span>
+            </>
+          ) : (
+            <ScoreBadge score={battle.score} />
+          )}
         </div>
       </div>
     )
@@ -124,8 +136,32 @@ export function BattleCard({ battle, participants, compact = false }: BattleCard
       </div>
 
       {/* Score + note strip */}
-      <div className="border-t border-border px-4 py-2 flex items-center gap-3 bg-muted/30">
-        <ScoreBadge score={battle.score} />
+      <div className="border-t border-border px-4 py-2.5 flex flex-col gap-2 bg-muted/30">
+        {battle.score === "tiebreaker" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Original deadlocked judge score */}
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-[9px] font-mono uppercase tracking-[0.15em] text-muted-foreground">
+                Tied
+              </span>
+              <span className="inline-block px-2 py-0.5 text-xs font-mono font-bold tracking-widest bg-border text-foreground">
+                {battle.tiedScore ?? "—"}
+              </span>
+            </span>
+            <span className="text-muted-foreground text-xs font-mono">→</span>
+            {/* Tiebreaker decision score */}
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-[9px] font-mono uppercase tracking-[0.15em] text-accent">
+                Tiebreaker
+              </span>
+              <span className="inline-block px-2 py-0.5 text-xs font-mono font-bold tracking-widest uppercase bg-accent text-accent-foreground">
+                {battle.tiebreakerScore ?? "TB"}
+              </span>
+            </span>
+          </div>
+        ) : (
+          <ScoreBadge score={battle.score} />
+        )}
         {battle.note && (
           <p className="text-[11px] text-muted-foreground leading-snug">{battle.note}</p>
         )}

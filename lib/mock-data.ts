@@ -28,6 +28,8 @@
  *      .blueCorner  — participant id
  *      .winner      — participant id (must be redCorner or blueCorner)
  *      .score       — "3-0" | "2-1" | "tiebreaker"
+ *      .tiedScore   — only for tiebreakers: the deadlocked judge vote, e.g. "1-1-1"
+ *      .tiebreakerScore — only for tiebreakers: how it was decided, e.g. "2-1"
  *      .note        — optional string
  */
 
@@ -150,6 +152,8 @@ export const events: EventRecap[] = [
               blueCorner: "soul-city",
               winner: "east-van-rockers",
               score: "tiebreaker",
+              tiedScore: "1-1-1",
+              tiebreakerScore: "2-1",
               note: "Went to a second tiebreaker round after judges deadlocked 1-1-1.",
             },
           ],
@@ -211,7 +215,7 @@ export const events: EventRecap[] = [
             { redCorner: "flow", blueCorner: "anchor", winner: "flow", score: "2-1" },
             { redCorner: "machine", blueCorner: "haze", winner: "machine", score: "2-1" },
             { redCorner: "blaze", blueCorner: "phantom", winner: "blaze", score: "3-0" },
-            { redCorner: "echo", blueCorner: "spin", winner: "echo", score: "tiebreaker", note: "Tiebreaker battle after a 1-1-1 split." },
+            { redCorner: "echo", blueCorner: "spin", winner: "echo", score: "tiebreaker", tiedScore: "1-1-1", tiebreakerScore: "3-0", note: "Tiebreaker battle after a 1-1-1 split." },
             { redCorner: "nova", blueCorner: "jazz", winner: "nova", score: "2-1" },
             { redCorner: "air", blueCorner: "orbit", winner: "air", score: "2-1" },
           ],
@@ -229,7 +233,7 @@ export const events: EventRecap[] = [
           label: "Semi-Finals",
           battles: [
             { redCorner: "victorious", blueCorner: "machine", winner: "victorious", score: "2-1" },
-            { redCorner: "d-style", blueCorner: "flow", winner: "d-style", score: "tiebreaker", note: "Extended tiebreaker — judges split 1-1 twice before a final call." },
+            { redCorner: "d-style", blueCorner: "flow", winner: "d-style", score: "tiebreaker", tiedScore: "1-1", tiebreakerScore: "2-1", note: "Extended tiebreaker — judges split 1-1 twice before a final call." },
           ],
         },
         {
@@ -282,6 +286,9 @@ export const events: EventRecap[] = [
 //             blueCorner: "crew-b",
 //             winner: "crew-a",
 //             score: "2-1",             // "3-0" | "2-1" | "tiebreaker"
+//             // For tiebreakers only — add both of these:
+//             // tiedScore: "1-1-1",       // the deadlocked judge vote
+//             // tiebreakerScore: "2-1",   // how the tiebreaker was decided
 //             note: "Optional note.",   // omit if none
 //           },
 //         ],

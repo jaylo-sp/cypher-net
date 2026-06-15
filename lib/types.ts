@@ -48,6 +48,18 @@ export interface BattleResult {
    * - "tiebreaker"  → judges were tied; a tiebreaker round determined the winner
    */
   score: "3-0" | "2-1" | "tiebreaker"
+  /**
+   * Only used when score === "tiebreaker".
+   * The deadlocked judge vote that triggered the tiebreaker round.
+   * e.g. "1-1-1" (3 judges all split) or "1-1" (2 judges tied)
+   */
+  tiedScore?: string
+  /**
+   * Only used when score === "tiebreaker".
+   * How the tiebreaker round was ultimately decided.
+   * e.g. "2-1", "3-0", or "Crowd decision"
+   */
+  tiebreakerScore?: string
   /** Optional short note (e.g. "Extended tiebreaker — went to a 2nd extra round") */
   note?: string
 }

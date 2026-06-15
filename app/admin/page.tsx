@@ -21,6 +21,8 @@ interface FormBattle {
   blueCorner: string
   winner: string
   score: BattleResult["score"]
+  tiedScore: string
+  tiebreakerScore: string
   note: string
 }
 
@@ -41,7 +43,7 @@ const STEP_LABELS: Record<Step, string> = {
 const SCORE_OPTIONS: BattleResult["score"][] = ["3-0", "2-1", "tiebreaker"]
 
 function emptyBattle(): FormBattle {
-  return { redCorner: "", blueCorner: "", winner: "", score: "2-1", note: "" }
+  return { redCorner: "", blueCorner: "", winner: "", score: "2-1", tiedScore: "", tiebreakerScore: "", note: "" }
 }
 
 function emptyRound(label: string): FormRound {
@@ -255,6 +257,10 @@ export default function AdminPage() {
         blueCorner: b.blueCorner,
         winner: b.winner,
         score: b.score,
+        ...(b.score === "tiebreaker" && b.tiedScore ? { tiedScore: b.tiedScore } : {}),
+        ...(b.score === "tiebreaker" && b.tiebreakerScore
+          ? { tiebreakerScore: b.tiebreakerScore }
+          : {}),
         ...(b.note ? { note: b.note } : {}),
       })),
     }))
@@ -603,6 +609,28 @@ export default function AdminPage() {
                                   }))}
                                 />
                               </div>
+                              {battle.score === "tiebreaker" && (
+                                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 border border-dashed border-accent/50 bg-accent/5 p-3">
+                                  <div>
+                                    <Label>Tied Score (deadlock)</Label>
+                                    <Input
+                                      value={battle.tiedScore}
+                                      onChange={(v) => updateBattle(rIdx, bIdx, "tiedScore", v)}
+                                      placeholder="1-1-1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label>Tiebreaker Score (decided by)</Label>
+                                    <Input
+                                      value={battle.tiebreakerScore}
+                                      onChange={(v) =>
+                                        updateBattle(rIdx, bIdx, "tiebreakerScore", v)
+                                      }
+                                      placeholder="2-1"
+                                    />
+                                  </div>
+                                </div>
+                              )}
                               <div className="sm:col-span-2">
                                 <Label>Note (optional)</Label>
                                 <Input

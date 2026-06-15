@@ -50,6 +50,7 @@ Types are defined in `lib/types.ts`. Every interface and field has JSDoc comment
 - `eventWinnerId` must match a `participant.id` within the same event object.
 - Every `battle.redCorner`, `battle.blueCorner`, and `battle.winner` must match a `participant.id` in the same event.
 - `bracket.size` must be `8` or `16`.
+- For a tiebreaker battle, set `score: "tiebreaker"` and add `tiedScore` (the deadlocked judge vote, e.g. `"1-1-1"`) and `tiebreakerScore` (how it was decided, e.g. `"2-1"`).
 
 ### Admin Form (Alternative)
 
